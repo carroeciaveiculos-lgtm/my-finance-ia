@@ -65,6 +65,16 @@ interface LancamentoComCategoria {
   data: string
   descricao: string | null
   categoria_id: string | null
+  subcategoria_id?: string | null
+  categoria?: {
+    nome: string
+    tipo: string
+  } | null
+  subcategoria?: {
+    nome: string
+    tipo: string
+  } | null
+  // Mantém retrocompatibilidade para dados legados ou mocks antigos
   categorias?: {
     nome: string
     tipo: string
@@ -145,7 +155,11 @@ export const Dashboard: React.FC = () => {
     try {
       const { data, error } = await rawClient
         .from('lancamentos')
-        .select('*, categorias(nome, tipo)')
+        .select(`
+          *,
+          categoria:categorias!lancamentos_categoria_id_fkey(nome, tipo),
+          subcategoria:categorias!lancamentos_subcategoria_id_fkey(nome, tipo)
+        `)
         .eq('user_id', user.id)
         .order('data', { ascending: true })
 
@@ -289,7 +303,7 @@ export const Dashboard: React.FC = () => {
     lancamentosPeriodo
       .filter((l) => l.tipo === 'despesa')
       .forEach((l) => {
-        const nomeCat = l.categorias?.nome || 'Sem categoria'
+        const nomeCat = l.categoria?.nome || l.categorias?.nome || 'Sem categoria'
         const val = Number(l.valor || 0)
         mapa.set(nomeCat, (mapa.get(nomeCat) || 0) + val)
       })

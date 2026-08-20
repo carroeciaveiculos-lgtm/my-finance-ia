@@ -100,6 +100,7 @@ describe('ETAPA 4 — Dashboard com Gráficos (Recharts) e Dados Reais', () => {
         data: mesAtual,
         descricao: 'Salário',
         categoria_id: 'cat-salario',
+        categoria: { nome: 'Salário', tipo: 'receita' },
         categorias: { nome: 'Salário', tipo: 'receita' },
       },
       {
@@ -110,6 +111,7 @@ describe('ETAPA 4 — Dashboard com Gráficos (Recharts) e Dados Reais', () => {
         data: mesAtual,
         descricao: 'Supermercado',
         categoria_id: 'cat-alimentacao',
+        categoria: { nome: 'Alimentação', tipo: 'despesa' },
         categorias: { nome: 'Alimentação', tipo: 'despesa' },
       },
     ]
