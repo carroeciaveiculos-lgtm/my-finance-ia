@@ -1,3 +1,5 @@
 {
-  "_versions": {}
+  "_versions": {
+    "keep-alive": 2
+  }
 }

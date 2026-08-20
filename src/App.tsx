@@ -1,29 +1,139 @@
-/* Main App Component - Handles routing (using react-router-dom), query client and other providers - use this file to add all routes */
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import React from 'react'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider } from '@/hooks/use-auth'
+import { ProtectedRoute } from '@/routes/ProtectedRoute'
+import { AppLayout } from '@/components/layout/AppLayout'
 import { Toaster } from '@/components/ui/toaster'
 import { Toaster as Sonner } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import Index from './pages/Index'
+
+// Páginas Principais
+import Login from './pages/Login'
+import Cadastro from './pages/Cadastro'
+import Dashboard from './pages/Dashboard'
+import ModuloEmBreve from './pages/ModuloEmBreve'
 import NotFound from './pages/NotFound'
-import Layout from './components/Layout'
 
-// ONLY IMPORT AND RENDER WORKING PAGES, NEVER ADD PLACEHOLDER COMPONENTS OR PAGES IN THIS FILE
-// AVOID REMOVING ANY CONTEXT PROVIDERS FROM THIS FILE (e.g. TooltipProvider, Toaster, Sonner)
+const App: React.FC = () => {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <Routes>
+            {/* Rotas Públicas de Autenticação */}
+            <Route path="/login" element={<Login />} />
+            <Route path="/cadastro" element={<Cadastro />} />
 
-const App = () => (
-  <BrowserRouter>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <Routes>
-        <Route element={<Layout />}>
-          <Route path="/" element={<Index />} />
-          {/* ADD ALL CUSTOM ROUTES MUST BE ADDED HERE */}
-        </Route>
-        <Route path="*" element={<NotFound />} />
-      </Routes>
-    </TooltipProvider>
-  </BrowserRouter>
-)
+            {/* Redirecionamento da Raiz para o Dashboard */}
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Navigate to="/dashboard" replace />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Rotas Protegidas dentro do AppLayout */}
+            <Route
+              element={
+                <ProtectedRoute>
+                  <AppLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route
+                path="/lancamentos"
+                element={
+                  <ModuloEmBreve
+                    titulo="Lançamentos Financeiros"
+                    etapa="Etapa 3"
+                    descricao="Cadastro de receitas, despesas, categorização e periodicidade."
+                  />
+                }
+              />
+              <Route
+                path="/metas"
+                element={
+                  <ModuloEmBreve
+                    titulo="Metas Financeiras"
+                    etapa="Etapa 5"
+                    descricao="Definição de objetivos de curto, médio e longo prazo com acompanhamento visual."
+                  />
+                }
+              />
+              <Route
+                path="/dividas"
+                element={
+                  <ModuloEmBreve
+                    titulo="Dívidas, Consórcios e Seguros"
+                    etapa="Etapa 6"
+                    descricao="Mapeamento de passivos, taxas de juros, amortização e proteção patrimonial."
+                  />
+                }
+              />
+              <Route
+                path="/investimentos"
+                element={
+                  <ModuloEmBreve
+                    titulo="Carteira de Investimentos"
+                    etapa="Etapa 6"
+                    descricao="Acompanhamento de alocação de ativos e rentabilidade consolidada."
+                  />
+                }
+              />
+              <Route
+                path="/extratos"
+                element={
+                  <ModuloEmBreve
+                    titulo="Extratos & Importação"
+                    etapa="Etapa 3"
+                    descricao="Importação inteligente de arquivos CSV, OFX e fallback de PDF."
+                  />
+                }
+              />
+              <Route
+                path="/conciliacao"
+                element={
+                  <ModuloEmBreve
+                    titulo="Conciliação Bancária"
+                    etapa="Etapa 7"
+                    descricao="Confronto automático de alta precisão entre extratos e lançamentos."
+                  />
+                }
+              />
+              <Route
+                path="/james"
+                element={
+                  <ModuloEmBreve
+                    titulo="Assistente Inteligente James"
+                    etapa="Etapa 8"
+                    descricao="Interface conversacional inteligente com regras éticas anti-alucinação."
+                  />
+                }
+              />
+              <Route
+                path="/relatorios"
+                element={
+                  <ModuloEmBreve
+                    titulo="Relatórios Analíticos"
+                    etapa="Etapa 10"
+                    descricao="Geração de demonstrativos, fluxo de caixa e evolução patrimonial."
+                  />
+                }
+              />
+            </Route>
+
+            {/* Rota 404 */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </TooltipProvider>
+      </AuthProvider>
+    </BrowserRouter>
+  )
+}
 
 export default App

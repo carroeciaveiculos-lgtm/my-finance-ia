@@ -53,6 +53,30 @@ Toda a documentação detalhada está organizada na pasta `docs/`:
 
 ---
 
+## Domínio e Acesso em Produção
+
+- **Domínio de Produção / Hospedagem:** A aplicação é hospedada e distribuída na infraestrutura do Skip Cloud sob o domínio gerado para este ambiente:
+  - **Domínio canônico da aplicação:** `https://my-finace-ia.goskip.app` (ou URL atribuída pelo ambiente de build do Skip).
+  - **Motivo do formato:** A plataforma Skip gera e provisiona subdomínios automáticos e certificados TLS para deploy instantâneo de cada projeto React + Vite.
+  - **API Supabase Conectada:** `https://vnvoobfuslxthhyvojka.supabase.co`
+
+---
+
+## Usuários de Acesso Homologados (Etapa 1)
+
+O sistema conta com 2 usuários autorizados:
+1. **Adriana Araújo** (`nutriadrianaaraujo22@gmail.com`) — Senha: `Luga94@@`
+2. **Luiz Fernando Araújo** (`luizfernandora72@gmail.com`) — Senha: `Luga94@@`
+
+---
+
 ## Manutenção do Ambiente em Produção (Keep-Alive)
 
-Para garantir que o ambiente de testes na nuvem fique sempre disponível sem atrasos ao abrir o aplicativo, o projeto conta com um mecanismo de **keep-alive** (um "despertador" automático via Cloudflare Worker que faz uma consulta leve ao banco a cada 48 horas). A estrutura foi preparada nesta Etapa 0 e a sua ativação funcional ocorre na Etapa 1.
+Para garantir que o ambiente de testes na nuvem fique sempre disponível sem atrasos ao abrir o aplicativo, o projeto conta com um mecanismo de **keep-alive** (um disparador periódico via Cloudflare Worker chamando a Edge Function `/functions/v1/keep-alive` no Supabase a cada 48 horas).
+
+Comando para teste direto da Edge Function:
+```bash
+curl -X GET "https://vnvoobfuslxthhyvojka.supabase.co/functions/v1/keep-alive" \
+  -H "apikey: <SUPABASE_ANON_KEY>" \
+  -H "Authorization: Bearer <SUPABASE_ANON_KEY>"
+```
