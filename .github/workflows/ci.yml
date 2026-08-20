@@ -1,0 +1,27 @@
+name: CI - Verificação de Estrutura
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  validate-structure:
+    name: Validar Estrutura do Repositório
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: Verificar Presença de Arquivos Base
+        run: |
+          test -f README.md || exit 1
+          test -f DECISOES.md || exit 1
+          test -f docs/arquitetura.md || exit 1
+          test -f docs/importacao.md || exit 1
+          test -f docs/manual-usuario.md || exit 1
+          test -f docs/decisoes/0001-stack-supabase-r2.md || exit 1
+          test -f docs/decisoes/0002-keep-alive-supabase.md || exit 1
+          test -f workers/keep-alive/README.md || exit 1
+          echo "Estrutura e documentação da Etapa 0 validadas com sucesso!"
