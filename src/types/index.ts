@@ -10,3 +10,144 @@ export interface UserSession {
   email: string
   nome: string
 }
+
+// ==========================================
+// Entidades Financeiras (Etapa 2)
+// ==========================================
+
+export type TipoConta = 'conta_corrente' | 'poupanca' | 'cartao_credito' | 'dinheiro' | 'outro'
+
+export interface Conta {
+  id: string
+  user_id: string
+  nome: string
+  tipo: TipoConta
+  banco: string | null
+  saldo_inicial: number
+  created_at: string
+  updated_at: string
+}
+
+export type TipoLancamento = 'receita' | 'despesa'
+
+export interface Categoria {
+  id: string
+  user_id: string | null
+  nome: string
+  tipo: TipoLancamento
+  categoria_pai_id: string | null
+  created_at: string
+  updated_at: string
+  subcategorias?: Categoria[]
+}
+
+export interface Lancamento {
+  id: string
+  user_id: string
+  tipo: TipoLancamento
+  valor: number
+  data: string
+  descricao: string | null
+  categoria_id: string | null
+  subcategoria_id: string | null
+  conta_id: string | null
+  documento_id: string | null
+  created_at: string
+  updated_at: string
+  categoria?: Categoria | null
+  subcategoria?: Categoria | null
+  conta?: Conta | null
+}
+
+export type TipoDocumento = 'pdf' | 'csv' | 'xls' | 'xlsx' | 'ofx'
+export type StatusDocumento = 'importado' | 'processado' | 'erro' | 'nao_importado'
+
+export interface DocumentoImportado {
+  id: string
+  user_id: string
+  nome_arquivo: string
+  tipo: TipoDocumento
+  conta_id: string | null
+  status: StatusDocumento
+  caminho_storage: string | null
+  created_at: string
+}
+
+export type StatusConciliacao = 'correspondido' | 'nao_correspondido' | 'divergente' | 'revisao'
+
+export interface Conciliacao {
+  id: string
+  user_id: string
+  documento_id: string
+  lancamento_id: string
+  status: StatusConciliacao
+  data_correspondencia: string | null
+  created_at: string
+}
+
+export interface Meta {
+  id: string
+  user_id: string
+  nome: string
+  valor_objetivo: number
+  valor_atual: number
+  data_limite: string | null
+  status: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Divida {
+  id: string
+  user_id: string
+  nome: string
+  valor_total: number
+  valor_pago: number
+  taxa_juros: number | null
+  parcelas_total: number | null
+  parcelas_pagas: number
+  status: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Investimento {
+  id: string
+  user_id: string
+  nome: string
+  tipo: string | null
+  valor_aplicado: number
+  valor_atual: number
+  data_aplicacao: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type StatusConsorcio = 'ativo' | 'contemplado' | 'quitado'
+
+export interface Consorcio {
+  id: string
+  user_id: string
+  nome: string
+  valor_credito: number
+  valor_parcela: number
+  parcelas_total: number
+  parcelas_pagas: number
+  status: StatusConsorcio
+  created_at: string
+  updated_at: string
+}
+
+export interface Seguro {
+  id: string
+  user_id: string
+  nome: string
+  tipo: string | null
+  seguradora: string | null
+  valor_premio: number | null
+  data_inicio: string | null
+  data_vigencia: string | null
+  status: string | null
+  created_at: string
+  updated_at: string
+}
