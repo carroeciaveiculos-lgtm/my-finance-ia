@@ -23,7 +23,8 @@ export const lancamentosService = {
           *,
           categoria:categorias!lancamentos_categoria_id_fkey(*),
           subcategoria:categorias!lancamentos_subcategoria_id_fkey(*),
-          conta:contas!lancamentos_conta_id_fkey(*)
+          conta:contas!lancamentos_conta_id_fkey(*),
+          conta_destino:contas!lancamentos_conta_destino_id_fkey(*)
         `)
         .order('data', { ascending: false })
 
@@ -60,7 +61,8 @@ export const lancamentosService = {
           *,
           categoria:categorias!lancamentos_categoria_id_fkey(*),
           subcategoria:categorias!lancamentos_subcategoria_id_fkey(*),
-          conta:contas!lancamentos_conta_id_fkey(*)
+          conta:contas!lancamentos_conta_id_fkey(*),
+          conta_destino:contas!lancamentos_conta_destino_id_fkey(*)
         `)
         .eq('id', id)
         .maybeSingle()
@@ -80,6 +82,7 @@ export const lancamentosService = {
     categoria_id?: string | null
     subcategoria_id?: string | null
     conta_id?: string | null
+    conta_destino_id?: string | null
     documento_id?: string | null
   }): Promise<{ data: Lancamento | null; error: Error | null }> {
     try {
@@ -96,16 +99,21 @@ export const lancamentosService = {
           valor: lancamento.valor,
           data: lancamento.data,
           descricao: lancamento.descricao || null,
-          categoria_id: lancamento.categoria_id || null,
-          subcategoria_id: lancamento.subcategoria_id || null,
+          categoria_id:
+            lancamento.tipo === 'transferencia' ? null : lancamento.categoria_id || null,
+          subcategoria_id:
+            lancamento.tipo === 'transferencia' ? null : lancamento.subcategoria_id || null,
           conta_id: lancamento.conta_id || null,
+          conta_destino_id:
+            lancamento.tipo === 'transferencia' ? lancamento.conta_destino_id || null : null,
           documento_id: lancamento.documento_id || null,
         })
         .select(`
           *,
           categoria:categorias!lancamentos_categoria_id_fkey(*),
           subcategoria:categorias!lancamentos_subcategoria_id_fkey(*),
-          conta:contas!lancamentos_conta_id_fkey(*)
+          conta:contas!lancamentos_conta_id_fkey(*),
+          conta_destino:contas!lancamentos_conta_destino_id_fkey(*)
         `)
         .single()
 
@@ -119,22 +127,35 @@ export const lancamentosService = {
   async atualizar(
     id: string,
     updates: Partial<
-      Omit<Lancamento, 'id' | 'user_id' | 'created_at' | 'categoria' | 'subcategoria' | 'conta'>
+      Omit<
+        Lancamento,
+        'id' | 'user_id' | 'created_at' | 'categoria' | 'subcategoria' | 'conta' | 'conta_destino'
+      >
     >,
   ): Promise<{ data: Lancamento | null; error: Error | null }> {
     try {
+      const payload: Record<string, unknown> = {
+        ...updates,
+        updated_at: new Date().toISOString(),
+      }
+
+      if (updates.tipo === 'transferencia') {
+        payload.categoria_id = null
+        payload.subcategoria_id = null
+      } else if (updates.tipo === 'receita' || updates.tipo === 'despesa') {
+        payload.conta_destino_id = null
+      }
+
       const { data, error } = await rawClient
         .from('lancamentos')
-        .update({
-          ...updates,
-          updated_at: new Date().toISOString(),
-        })
+        .update(payload)
         .eq('id', id)
         .select(`
           *,
           categoria:categorias!lancamentos_categoria_id_fkey(*),
           subcategoria:categorias!lancamentos_subcategoria_id_fkey(*),
-          conta:contas!lancamentos_conta_id_fkey(*)
+          conta:contas!lancamentos_conta_id_fkey(*),
+          conta_destino:contas!lancamentos_conta_destino_id_fkey(*)
         `)
         .single()
 

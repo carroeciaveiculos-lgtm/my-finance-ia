@@ -33,7 +33,11 @@ import {
   CheckCircle2,
   PieChart as PieIcon,
   TrendingUp,
+  Target,
+  ArrowRight,
 } from 'lucide-react'
+import { metasService } from '@/services/metasService'
+import type { Meta } from '@/types'
 import { JAMES_LEIS, JAMES_TONE, JAMES_MICROCOPY, getSaudacaoHorario } from '@/lib/james'
 
 const rawClient = supabase as unknown as SupabaseClient
@@ -60,12 +64,14 @@ export type PeriodoFiltro =
 interface LancamentoComCategoria {
   id: string
   user_id: string
-  tipo: 'receita' | 'despesa'
+  tipo: 'receita' | 'despesa' | 'transferencia'
   valor: number
   data: string
   descricao: string | null
   categoria_id: string | null
   subcategoria_id?: string | null
+  conta_id?: string | null
+  conta_destino_id?: string | null
   categoria?: {
     nome: string
     tipo: string
@@ -140,6 +146,7 @@ export const Dashboard: React.FC = () => {
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
   const [todosLancamentos, setTodosLancamentos] = useState<LancamentoComCategoria[]>([])
+  const [metasAtivas, setMetasAtivas] = useState<Meta[]>([])
 
   const selectPeriodoId = useId()
 
@@ -153,23 +160,27 @@ export const Dashboard: React.FC = () => {
     setErro(null)
 
     try {
-      const { data, error } = await rawClient
-        .from('lancamentos')
-        .select(`
-          *,
-          categoria:categorias!lancamentos_categoria_id_fkey(nome, tipo),
-          subcategoria:categorias!lancamentos_subcategoria_id_fkey(nome, tipo)
-        `)
-        .eq('user_id', user.id)
-        .order('data', { ascending: true })
+      const [resLanc, resMetas] = await Promise.all([
+        rawClient
+          .from('lancamentos')
+          .select(`
+            *,
+            categoria:categorias!lancamentos_categoria_id_fkey(nome, tipo),
+            subcategoria:categorias!lancamentos_subcategoria_id_fkey(nome, tipo)
+          `)
+          .eq('user_id', user.id)
+          .order('data', { ascending: true }),
+        metasService.listar({ status: 'ativa' }),
+      ])
 
-      if (error) {
-        throw error
+      if (resLanc.error) {
+        throw resLanc.error
       }
 
-      setTodosLancamentos((data as unknown as LancamentoComCategoria[]) || [])
+      setTodosLancamentos((resLanc.data as unknown as LancamentoComCategoria[]) || [])
+      setMetasAtivas(resMetas.data || [])
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Erro ao consultar lançamentos no Supabase'
+      const msg = err instanceof Error ? err.message : 'Erro ao consultar dados no Supabase'
       setErro(msg)
     } finally {
       setCarregando(false)
@@ -669,6 +680,115 @@ export const Dashboard: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* ======================================================== */}
+      {/* SEÇÃO: PROGRESSO DE METAS ATIVAS                        */}
+      {/* ======================================================== */}
+      <Card className="rounded-xl bg-white shadow-sm border-verde-menta overflow-hidden">
+        <CardHeader className="pb-3 border-b border-verde-menta/50">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-lg bg-verde-menta text-verde-floresta flex items-center justify-center">
+                <Target className="h-4 w-4" />
+              </div>
+              <div>
+                <CardTitle className="text-base font-display font-semibold text-verde-floresta">
+                  Progresso de Metas
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Acompanhamento dos seus objetivos financeiros ativos.
+                </CardDescription>
+              </div>
+            </div>
+            <Link to="/metas">
+              <Botao variant="ghost" size="sm" className="gap-1.5 text-xs text-verde-floresta">
+                <span>Ver todas as metas</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Botao>
+            </Link>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-4">
+          {metasAtivas.length === 0 ? (
+            <div className="py-6 text-center space-y-2">
+              <p className="text-sm font-medium text-texto-principal">
+                Nenhuma meta ativa no momento.
+              </p>
+              <p className="text-xs text-texto-apoio">
+                Defina seus primeiros objetivos para acompanhar sua evolução aqui no Dashboard.
+              </p>
+              <div className="pt-2">
+                <Link to="/metas">
+                  <Botao size="sm" variant="menta" className="gap-1.5">
+                    <PlusCircle className="h-3.5 w-3.5" />
+                    <span>Crie sua primeira meta!</span>
+                  </Botao>
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {metasAtivas.map((meta) => {
+                const valorAtualNum = Number(meta.valor_atual || 0)
+                const valorObjNum = Number(meta.valor_objetivo || 1)
+                const percentual = Math.min(
+                  100,
+                  Math.max(0, Math.round((valorAtualNum / valorObjNum) * 100)),
+                )
+
+                // Cores da barra conforme Design System
+                let corBarra = '#C0392B' // < 30% Vermelho suave
+                if (percentual >= 80 || meta.status === 'concluida') {
+                  corBarra = '#2E8B57' // ≥ 80% Verde sucesso
+                } else if (percentual >= 30) {
+                  corBarra = '#D4A853' // 30-79% Dourado
+                }
+
+                return (
+                  <div
+                    key={meta.id}
+                    className="p-3.5 rounded-xl border border-verde-menta/70 bg-creme/30 space-y-2 hover:bg-creme/60 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-semibold text-sm text-texto-principal truncate">
+                        {meta.nome}
+                      </span>
+                      <span
+                        className="font-bold text-xs tabular-nums shrink-0"
+                        style={{ color: corBarra }}
+                      >
+                        {percentual}%
+                      </span>
+                    </div>
+
+                    {/* Mini Barra de Progresso */}
+                    <div
+                      className="w-full h-2 rounded-full bg-verde-menta/50 overflow-hidden"
+                      role="progressbar"
+                      aria-valuenow={percentual}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                    >
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{
+                          width: `${percentual}%`,
+                          backgroundColor: corBarra,
+                        }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-texto-apoio tabular-nums">
+                      <span>{formatarMoeda(valorAtualNum)}</span>
+                      <span>Alvo: {formatarMoeda(valorObjNum)}</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* ======================================================== */}
       {/* 4. GRÁFICOS: LINHA/ÁREA (EVOLUÇÃO) + ROSCA (DESPESAS)    */}

@@ -14,6 +14,7 @@ import Dashboard from './pages/Dashboard'
 import ContasPage from './pages/Contas'
 import LancamentosPage from './pages/Lancamentos'
 import ImportacaoPage from './pages/Importacao'
+import MetasPage from './pages/Metas'
 import ModuloEmBreve from './pages/ModuloEmBreve'
 import NotFound from './pages/NotFound'
 
@@ -52,16 +53,7 @@ const App: React.FC = () => {
               <Route path="/lancamentos" element={<LancamentosPage />} />
               <Route path="/importacao" element={<ImportacaoPage />} />
               <Route path="/extratos" element={<ImportacaoPage />} />
-              <Route
-                path="/metas"
-                element={
-                  <ModuloEmBreve
-                    titulo="Metas Financeiras"
-                    etapa="Etapa 5"
-                    descricao="Definição de objetivos de curto, médio e longo prazo com acompanhamento visual."
-                  />
-                }
-              />
+              <Route path="/metas" element={<MetasPage />} />
               <Route
                 path="/dividas"
                 element={

@@ -35,7 +35,7 @@ const ITENS_MENU: NavItem[] = [
   { rotulo: 'Contas & Carteiras', rota: '/contas', icone: Wallet },
   { rotulo: 'Lançamentos', rota: '/lancamentos', icone: ArrowLeftRight },
   { rotulo: 'Importação de Extratos', rota: '/importacao', icone: FileSpreadsheet },
-  { rotulo: 'Metas', rota: '/metas', icone: Target, emBreve: true },
+  { rotulo: 'Metas', rota: '/metas', icone: Target },
   { rotulo: 'Dívidas & Crédito', rota: '/dividas', icone: CreditCard, emBreve: true },
   { rotulo: 'Investimentos', rota: '/investimentos', icone: TrendingUp, emBreve: true },
   { rotulo: 'Conciliação', rota: '/conciliacao', icone: CheckCheck, emBreve: true },

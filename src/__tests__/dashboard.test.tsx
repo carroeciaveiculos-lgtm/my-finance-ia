@@ -114,6 +114,31 @@ describe('ETAPA 4 — Dashboard com Gráficos (Recharts) e Dados Reais', () => {
         categoria: { nome: 'Alimentação', tipo: 'despesa' },
         categorias: { nome: 'Alimentação', tipo: 'despesa' },
       },
+      {
+        id: '3',
+        user_id: 'user-com-dados',
+        tipo: 'transferencia',
+        valor: 1000,
+        data: mesAtual,
+        descricao: 'Pagamento Fatura Cartão',
+        conta_id: 'conta-corrente',
+        conta_destino_id: 'cartao-credito',
+        categoria_id: null,
+      },
+    ]
+
+    const mockMetas = [
+      {
+        id: 'meta-1',
+        user_id: 'user-com-dados',
+        nome: 'Reserva de Emergência',
+        valor_objetivo: 10000,
+        valor_atual: 8500,
+        data_limite: '2026-12-31',
+        status: 'ativa',
+        created_at: '2026-01-01',
+        updated_at: '2026-01-01',
+      },
     ]
 
     vi.spyOn(useAuthHook, 'useAuth').mockReturnValue({
@@ -132,16 +157,31 @@ describe('ETAPA 4 — Dashboard com Gráficos (Recharts) e Dados Reais', () => {
       refreshProfile: vi.fn(),
     })
 
-    vi.spyOn(supabase, 'from').mockReturnValue({
-      select: vi.fn().mockReturnValue({
-        eq: vi.fn().mockReturnValue({
-          order: vi.fn().mockResolvedValue({
-            data: mockLancamentos,
-            error: null,
+    vi.spyOn(supabase, 'from').mockImplementation((table: string) => {
+      if (table === 'metas') {
+        return {
+          select: vi.fn().mockReturnValue({
+            order: vi.fn().mockReturnValue({
+              eq: vi.fn().mockResolvedValue({
+                data: mockMetas,
+                error: null,
+              }),
+            }),
+          }),
+        } as any
+      }
+
+      return {
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            order: vi.fn().mockResolvedValue({
+              data: mockLancamentos,
+              error: null,
+            }),
           }),
         }),
-      }),
-    } as any)
+      } as any
+    })
 
     render(
       <MemoryRouter>
@@ -172,6 +212,11 @@ describe('ETAPA 4 — Dashboard com Gráficos (Recharts) e Dados Reais', () => {
     // Título dos gráficos
     expect(screen.getByText('Evolução: Receitas vs Despesas')).toBeInTheDocument()
     expect(screen.getByText('Despesas por Categoria')).toBeInTheDocument()
+
+    // Card de Progresso de Metas
+    expect(screen.getByText('Progresso de Metas')).toBeInTheDocument()
+    expect(screen.getByText('Reserva de Emergência')).toBeInTheDocument()
+    expect(screen.getByText('85%')).toBeInTheDocument()
   })
 
   it('4. Renderiza estado de erro com botão de tentar novamente', async () => {

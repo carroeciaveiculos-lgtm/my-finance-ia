@@ -30,6 +30,7 @@ describe('Validação do Modelo de Dados Completo + RLS + Contas (Etapa 2)', () 
   let documentoAId: string
   let lancamentoAId: string
   let conciliacaoAId: string
+  let contaBId: string
   let metaAId: string
   let dividaAId: string
   let investimentoAId: string
@@ -111,6 +112,22 @@ describe('Validação do Modelo de Dados Completo + RLS + Contas (Etapa 2)', () 
     expect(data.tipo).toBe('conta_corrente')
     expect(Number(data.saldo_inicial)).toBe(1500.5)
     contaAId = data.id
+
+    // Cria segunda conta (Cartão de Crédito) para teste de transferência
+    const resConta2 = await clientA
+      .from('contas')
+      .insert({
+        user_id: userAId,
+        nome: 'Cartão de Crédito XP',
+        tipo: 'cartao_credito',
+        banco: 'XP',
+        saldo_inicial: 0,
+      })
+      .select()
+      .single()
+
+    expect(resConta2.error).toBeNull()
+    contaBId = resConta2.data.id
   })
 
   it('3. Deve criar categorias personalizadas hierárquicas (Pai e Filha) para o Usuário A', async () => {
@@ -194,6 +211,35 @@ describe('Validação do Modelo de Dados Completo + RLS + Contas (Etapa 2)', () 
     expect(data.subcategoria.nome).toBe('Reforma do Escritório')
     expect(data.conta.nome).toBe('Conta Corrente Principal')
     lancamentoAId = data.id
+  })
+
+  it('5.1. Deve criar transferência entre contas (pagamento de fatura) com conta_destino_id', async () => {
+    const { data, error } = await clientA
+      .from('lancamentos')
+      .insert({
+        user_id: userAId,
+        tipo: 'transferencia',
+        valor: 1200.0,
+        data: '2026-03-20',
+        descricao: 'Pagamento Fatura Cartão XP',
+        conta_id: contaAId,
+        conta_destino_id: contaBId,
+      })
+      .select(`
+        *,
+        conta:contas!lancamentos_conta_id_fkey(*),
+        conta_destino:contas!lancamentos_conta_destino_id_fkey(*)
+      `)
+      .single()
+
+    expect(error).toBeNull()
+    expect(data).toBeDefined()
+    expect(data.tipo).toBe('transferencia')
+    expect(Number(data.valor)).toBe(1200.0)
+    expect(data.conta_id).toBe(contaAId)
+    expect(data.conta_destino_id).toBe(contaBId)
+    expect(data.conta.nome).toBe('Conta Corrente Principal')
+    expect(data.conta_destino.nome).toBe('Cartão de Crédito XP')
   })
 
   it('6. Deve inserir e ler na tabela CONCILIACAO (Usuário A)', async () => {

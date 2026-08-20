@@ -4,54 +4,7 @@ import type { Meta, Divida, Investimento, Consorcio, Seguro } from '@/types'
 
 const rawClient = supabase as unknown as SupabaseClient
 
-export const metasService = {
-  async listar(): Promise<{ data: Meta[] | null; error: Error | null }> {
-    try {
-      const { data, error } = await rawClient
-        .from('metas')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      return { data: data as Meta[], error: null }
-    } catch (err: unknown) {
-      return { data: null, error: err as Error }
-    }
-  },
-
-  async criar(meta: {
-    nome: string
-    valor_objetivo: number
-    valor_atual?: number
-    data_limite?: string | null
-    status?: string | null
-  }): Promise<{ data: Meta | null; error: Error | null }> {
-    try {
-      const {
-        data: { user },
-      } = await rawClient.auth.getUser()
-      if (!user) throw new Error('Usuário não autenticado')
-
-      const { data, error } = await rawClient
-        .from('metas')
-        .insert({
-          user_id: user.id,
-          nome: meta.nome,
-          valor_objetivo: meta.valor_objetivo,
-          valor_atual: meta.valor_atual ?? 0,
-          data_limite: meta.data_limite || null,
-          status: meta.status || 'em_andamento',
-        })
-        .select()
-        .single()
-
-      if (error) throw error
-      return { data: data as Meta, error: null }
-    } catch (err: unknown) {
-      return { data: null, error: err as Error }
-    }
-  },
-}
+export { metasService } from './metasService'
 
 export const dividasService = {
   async listar(): Promise<{ data: Divida[] | null; error: Error | null }> {

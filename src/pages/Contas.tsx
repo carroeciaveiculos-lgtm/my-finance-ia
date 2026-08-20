@@ -81,12 +81,23 @@ export const ContasPage: React.FC = () => {
 
       if (resLancamentos.data) {
         resLancamentos.data.forEach((l) => {
-          if (l.conta_id && mapaSaldos[l.conta_id] !== undefined) {
-            const v = Number(l.valor) || 0
-            if (l.tipo === 'receita') {
+          const v = Number(l.valor) || 0
+          if (l.tipo === 'receita') {
+            if (l.conta_id && mapaSaldos[l.conta_id] !== undefined) {
               mapaSaldos[l.conta_id] += v
-            } else {
+            }
+          } else if (l.tipo === 'despesa') {
+            if (l.conta_id && mapaSaldos[l.conta_id] !== undefined) {
               mapaSaldos[l.conta_id] -= v
+            }
+          } else if (l.tipo === 'transferencia') {
+            // Sai da conta origem
+            if (l.conta_id && mapaSaldos[l.conta_id] !== undefined) {
+              mapaSaldos[l.conta_id] -= v
+            }
+            // Entra na conta destino
+            if (l.conta_destino_id && mapaSaldos[l.conta_destino_id] !== undefined) {
+              mapaSaldos[l.conta_destino_id] += v
             }
           }
         })

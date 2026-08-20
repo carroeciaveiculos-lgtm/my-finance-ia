@@ -28,13 +28,13 @@ export interface Conta {
   updated_at: string
 }
 
-export type TipoLancamento = 'receita' | 'despesa'
+export type TipoLancamento = 'receita' | 'despesa' | 'transferencia'
 
 export interface Categoria {
   id: string
   user_id: string | null
   nome: string
-  tipo: TipoLancamento
+  tipo: 'receita' | 'despesa'
   categoria_pai_id: string | null
   created_at: string
   updated_at: string
@@ -51,12 +51,14 @@ export interface Lancamento {
   categoria_id: string | null
   subcategoria_id: string | null
   conta_id: string | null
+  conta_destino_id?: string | null
   documento_id: string | null
   created_at: string
   updated_at: string
   categoria?: Categoria | null
   subcategoria?: Categoria | null
   conta?: Conta | null
+  conta_destino?: Conta | null
 }
 
 export type TipoDocumento = 'pdf' | 'csv' | 'xls' | 'xlsx' | 'ofx'
@@ -85,6 +87,8 @@ export interface Conciliacao {
   created_at: string
 }
 
+export type StatusMeta = 'ativa' | 'concluida' | 'pausada'
+
 export interface Meta {
   id: string
   user_id: string
@@ -92,7 +96,7 @@ export interface Meta {
   valor_objetivo: number
   valor_atual: number
   data_limite: string | null
-  status: string | null
+  status: StatusMeta | string | null
   created_at: string
   updated_at: string
 }
