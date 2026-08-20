@@ -7,10 +7,11 @@ import { Botao } from '@/components/ui/botao'
 import {
   LayoutDashboard,
   ArrowLeftRight,
+  Wallet,
+  FileSpreadsheet,
   Target,
   CreditCard,
   TrendingUp,
-  FileSpreadsheet,
   CheckCheck,
   Bot,
   FileText,
@@ -31,11 +32,12 @@ interface NavItem {
 
 const ITENS_MENU: NavItem[] = [
   { rotulo: 'Dashboard', rota: '/dashboard', icone: LayoutDashboard },
-  { rotulo: 'Lançamentos', rota: '/lancamentos', icone: ArrowLeftRight, emBreve: true },
+  { rotulo: 'Contas & Carteiras', rota: '/contas', icone: Wallet },
+  { rotulo: 'Lançamentos', rota: '/lancamentos', icone: ArrowLeftRight },
+  { rotulo: 'Importação de Extratos', rota: '/importacao', icone: FileSpreadsheet },
   { rotulo: 'Metas', rota: '/metas', icone: Target, emBreve: true },
   { rotulo: 'Dívidas & Crédito', rota: '/dividas', icone: CreditCard, emBreve: true },
   { rotulo: 'Investimentos', rota: '/investimentos', icone: TrendingUp, emBreve: true },
-  { rotulo: 'Extratos & Importação', rota: '/extratos', icone: FileSpreadsheet, emBreve: true },
   { rotulo: 'Conciliação', rota: '/conciliacao', icone: CheckCheck, emBreve: true },
   { rotulo: 'Assistente James', rota: '/james', icone: Bot, emBreve: true },
   { rotulo: 'Relatórios', rota: '/relatorios', icone: FileText, emBreve: true },

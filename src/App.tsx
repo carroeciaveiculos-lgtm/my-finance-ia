@@ -11,6 +11,9 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import Login from './pages/Login'
 import Cadastro from './pages/Cadastro'
 import Dashboard from './pages/Dashboard'
+import ContasPage from './pages/Contas'
+import LancamentosPage from './pages/Lancamentos'
+import ImportacaoPage from './pages/Importacao'
 import ModuloEmBreve from './pages/ModuloEmBreve'
 import NotFound from './pages/NotFound'
 
@@ -45,16 +48,10 @@ const App: React.FC = () => {
               }
             >
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route
-                path="/lancamentos"
-                element={
-                  <ModuloEmBreve
-                    titulo="Lançamentos Financeiros"
-                    etapa="Etapa 3"
-                    descricao="Cadastro de receitas, despesas, categorização e periodicidade."
-                  />
-                }
-              />
+              <Route path="/contas" element={<ContasPage />} />
+              <Route path="/lancamentos" element={<LancamentosPage />} />
+              <Route path="/importacao" element={<ImportacaoPage />} />
+              <Route path="/extratos" element={<ImportacaoPage />} />
               <Route
                 path="/metas"
                 element={
@@ -82,16 +79,6 @@ const App: React.FC = () => {
                     titulo="Carteira de Investimentos"
                     etapa="Etapa 6"
                     descricao="Acompanhamento de alocação de ativos e rentabilidade consolidada."
-                  />
-                }
-              />
-              <Route
-                path="/extratos"
-                element={
-                  <ModuloEmBreve
-                    titulo="Extratos & Importação"
-                    etapa="Etapa 3"
-                    descricao="Importação inteligente de arquivos CSV, OFX e fallback de PDF."
                   />
                 }
               />
