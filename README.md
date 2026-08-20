@@ -56,7 +56,7 @@ Toda a documentação detalhada está organizada na pasta `docs/`:
 ## Domínio e Acesso em Produção
 
 - **Domínio de Produção / Hospedagem:** A aplicação é hospedada e distribuída na infraestrutura do Skip Cloud sob o domínio gerado para este ambiente:
-  - **Domínio canônico da aplicação:** `https://my-finace-ia.goskip.app` (ou URL atribuída pelo ambiente de build do Skip).
+  - **Domínio canônico da aplicação:** `https://myfinanceia.goskip.app` (ou URL atribuída pelo ambiente de build do Skip).
   - **Motivo do formato:** A plataforma Skip gera e provisiona subdomínios automáticos e certificados TLS para deploy instantâneo de cada projeto React + Vite.
   - **API Supabase Conectada:** `https://vnvoobfuslxthhyvojka.supabase.co`
 

@@ -17,7 +17,7 @@ O sistema foi desenhado com arquitetura modular e moderna, priorizando simplicid
 +-------------------------------------------------------------------------------+
 | 1. FRONTEND (Interface do Usuário)                                            |
 |    - React + Vite + Tailwind CSS + Recharts                                    |
-|    - Hospedado no Cloudflare Pages (my-finace-ia.goskip.app)                  |
+|    - Hospedado no Cloudflare Pages (myfinanceia.goskip.app)                   |
 +-------------------------------------------------------------------------------+
            |                                  |                        |
            | Chamadas de API / Dados          | Upload de Arquivos     | Conversas
@@ -48,7 +48,7 @@ O sistema foi desenhado com arquitetura modular e moderna, priorizando simplicid
 
 - **Tecnologias:** React, Vite, Tailwind CSS e biblioteca de gráficos Recharts.
 - **Função:** Fornecer telas rápidas, limpas e responsivas para registro financeiro, visualização de gráficos de despesas, metas, investimentos e interação com o assistente James.
-- **Hospedagem:** Cloudflare Pages no domínio `my-finace-ia.goskip.app`.
+- **Hospedagem:** Cloudflare Pages no domínio `myfinanceia.goskip.app`.
 
 ### 2. Backend, Autenticação e Banco de Dados (Supabase)
 
@@ -79,7 +79,7 @@ O sistema foi desenhado com arquitetura modular e moderna, priorizando simplicid
 
 ## 3. Fluxo Típico de Dados
 
-1. **Acesso do Usuário:** A usuária abre `my-finace-ia.goskip.app`, realiza login e visualiza o Dashboard com dados carregados do Supabase.
+1. **Acesso do Usuário:** A usuária abre `myfinanceia.goskip.app`, realiza login e visualiza o Dashboard com dados carregados do Supabase.
 2. **Envio de Extrato:** A usuária faz upload de um extrato (CSV, OFX ou PDF). O arquivo é salvo no Cloudflare R2 e processado para gerar pré-lançamentos no Supabase.
 3. **Consulta ao James:** A usuária pergunta sobre sua meta de economia. O sistema envia a pergunta e o resumo dos números reais ao Google Gemini, que retorna respostas práticas e fundamentadas.
 4. **Manutenção Silenciosa:** Nos bastidores, o Worker do Keep-Alive roda a cada 48h mantendo toda a estrutura ativa na nuvem.

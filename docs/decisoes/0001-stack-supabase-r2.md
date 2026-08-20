@@ -16,7 +16,7 @@ O desenvolvimento do sistema **my-finance-ia** demanda uma infraestrutura modern
 Adotar a seguinte composição tecnológica integrada:
 
 1. **Frontend:** React + Vite + Tailwind CSS + Recharts para construção de uma interface rica, responsiva e performática.
-2. **Hospedagem Frontend:** Cloudflare Pages no domínio `my-finace-ia.goskip.app`.
+2. **Hospedagem Frontend:** Cloudflare Pages no domínio `myfinanceia.goskip.app`.
 3. **Backend / Banco de Dados / Auth / Storage:** Supabase (PostgreSQL relacional, sistema de autenticação completo, políticas de segurança RLS e Edge Functions em TypeScript/Deno).
 4. **Armazenamento de Arquivos do Usuário:** Cloudflare R2 para armazenamento de extratos, comprovantes e anexos.
 5. **Inteligência Artificial:** Google Gemini via API oficial para alimentar o assistente inteligente James.

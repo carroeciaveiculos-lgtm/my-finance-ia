@@ -31,7 +31,7 @@ O escopo da versão 1 (v1) contempla todos os módulos essenciais para uma gest�
 ## c) Stack Tecnológica
 
 - **Frontend:** React + Vite + Tailwind CSS + Recharts (interface ágil, responsiva e com gráficos modernos).
-- **Hospedagem Frontend:** Cloudflare Pages no domínio `my-finace-ia.goskip.app`.
+- **Hospedagem Frontend:** Cloudflare Pages no domínio `myfinanceia.goskip.app`.
 - **Backend / Banco de Dados / Auth / Storage:** Supabase (PostgreSQL relacional, Autenticação de usuários, Supabase Storage e Edge Functions Deno/TypeScript).
 - **Armazenamento de Arquivos do Usuário:** Cloudflare R2 (armazenamento de objetos compatível com S3, sem custo de saída de dados).
 - **Inteligência Artificial (Assistente James):** Google Gemini via API oficial.
