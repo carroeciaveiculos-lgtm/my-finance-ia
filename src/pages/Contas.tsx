@@ -5,6 +5,7 @@ import type { Conta, TipoConta } from '@/types'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Botao } from '@/components/ui/botao'
 import { Modal } from '@/components/ui/modal'
+import { AutocompleteBanco } from '@/components/AutocompleteBanco'
 import { useToast } from '@/hooks/use-toast'
 import {
   Wallet,
@@ -586,6 +587,7 @@ export const ContasPage: React.FC = () => {
               </select>
             </div>
 
+            {/* Se for conta corrente ou poupança, a busca por banco com autocomplete aparece dentro dos dados bancários ou no campo de instituição */}
             <div>
               <label
                 htmlFor={bancoId}
@@ -631,23 +633,47 @@ export const ContasPage: React.FC = () => {
 
           {/* Campos Específicos: Conta Corrente / Poupança */}
           {(tipo === 'conta_corrente' || tipo === 'poupanca') && (
-            <div className="p-3.5 rounded-xl bg-verde-menta/15 border border-verde-menta/50 space-y-3 animate-fade-in">
-              <p className="text-xs font-semibold text-verde-floresta flex items-center gap-1.5">
-                <Building2 className="h-4 w-4" />
-                <span>Dados Bancários (Opcional)</span>
-              </p>
+            <div className="p-3.5 rounded-xl bg-verde-menta/15 border border-verde-menta/50 space-y-3.5 animate-fade-in">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-verde-floresta flex items-center gap-1.5">
+                  <Building2 className="h-4 w-4" />
+                  <span>Dados Bancários (Opcional)</span>
+                </p>
+                <span className="text-[10px] text-texto-apoio bg-verde-menta/40 px-2 py-0.5 rounded-full font-medium">
+                  Brasil API
+                </span>
+              </div>
+
+              {/* Autocomplete integrado com a Brasil API */}
+              <AutocompleteBanco
+                valorNome={banco}
+                valorCodigo={numeroBanco}
+                onSelectBanco={({ nome: nomeSelecionado, codigo: codigoSelecionado }) => {
+                  if (nomeSelecionado) {
+                    setBanco(nomeSelecionado)
+                  }
+                  if (codigoSelecionado) {
+                    setNumeroBanco(codigoSelecionado)
+                  }
+                }}
+              />
 
               <div>
-                <label
-                  htmlFor={numeroBancoId}
-                  className="block text-[11px] font-semibold text-texto-principal mb-1"
-                >
-                  Código / Número do Banco
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label
+                    htmlFor={numeroBancoId}
+                    className="block text-[11px] font-semibold text-texto-principal"
+                  >
+                    Código / Número do Banco (COMPE)
+                  </label>
+                  <span className="text-[10px] text-texto-apoio">
+                    Preenchido pela busca ou manual
+                  </span>
+                </div>
                 <input
                   id={numeroBancoId}
                   type="text"
-                  placeholder="Ex: 341 para Itaú, 001 para BB, 237 para Bradesco"
+                  placeholder="Ex: 341 (Itaú), 001 (BB), 260 (Nubank), 237 (Bradesco)"
                   value={numeroBanco}
                   onChange={(e) => setNumeroBanco(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-verde-menta bg-white text-xs text-texto-principal focus:outline-none focus:ring-2 focus:ring-verde-sage transition-all"
