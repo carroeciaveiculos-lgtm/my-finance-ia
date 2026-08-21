@@ -113,7 +113,7 @@ describe('Validação do Modelo de Dados Completo + RLS + Contas (Etapa 2)', () 
     expect(Number(data.saldo_inicial)).toBe(1500.5)
     contaAId = data.id
 
-    // Cria segunda conta (Cartão de Crédito) para teste de transferência
+    // Cria segunda conta (Cartão de Crédito) para teste de transferência e novos campos de identificação
     const resConta2 = await clientA
       .from('contas')
       .insert({
@@ -122,12 +122,42 @@ describe('Validação do Modelo de Dados Completo + RLS + Contas (Etapa 2)', () 
         tipo: 'cartao_credito',
         banco: 'XP',
         saldo_inicial: 0,
+        bandeira: 'Visa',
+        numero_cartao_final: '1234',
+        validade: '12/28',
+        nome_impresso: 'USUARIO TESTE A',
       })
       .select()
       .single()
 
     expect(resConta2.error).toBeNull()
+    expect(resConta2.data.bandeira).toBe('Visa')
+    expect(resConta2.data.numero_cartao_final).toBe('1234')
+    expect(resConta2.data.validade).toBe('12/28')
+    expect(resConta2.data.nome_impresso).toBe('USUARIO TESTE A')
     contaBId = resConta2.data.id
+  })
+
+  it('2.1. Deve atualizar conta bancária com dados bancários (numero_banco, agencia, conta)', async () => {
+    const { data, error } = await clientA
+      .from('contas')
+      .update({
+        numero_banco: '260',
+        agencia: '0001',
+        agencia_digito: '9',
+        conta: '1234567',
+        conta_digito: '8',
+      })
+      .eq('id', contaAId)
+      .select()
+      .single()
+
+    expect(error).toBeNull()
+    expect(data.numero_banco).toBe('260')
+    expect(data.agencia).toBe('0001')
+    expect(data.agencia_digito).toBe('9')
+    expect(data.conta).toBe('1234567')
+    expect(data.conta_digito).toBe('8')
   })
 
   it('3. Deve criar categorias personalizadas hierárquicas (Pai e Filha) para o Usuário A', async () => {

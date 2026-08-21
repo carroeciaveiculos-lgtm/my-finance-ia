@@ -49,12 +49,30 @@ export const ContasPage: React.FC = () => {
   const [tipo, setTipo] = useState<TipoConta>('conta_corrente')
   const [banco, setBanco] = useState('')
   const [saldoInicial, setSaldoInicial] = useState('0,00')
+  const [numeroBanco, setNumeroBanco] = useState('')
+  const [agencia, setAgencia] = useState('')
+  const [agenciaDigito, setAgenciaDigito] = useState('')
+  const [contaNumero, setContaNumero] = useState('')
+  const [contaDigito, setContaDigito] = useState('')
+  const [bandeira, setBandeira] = useState('')
+  const [numeroCartaoFinal, setNumeroCartaoFinal] = useState('')
+  const [validade, setValidade] = useState('')
+  const [nomeImpresso, setNomeImpresso] = useState('')
   const [erroForm, setErroForm] = useState<string | null>(null)
 
   const nomeId = useId()
   const tipoId = useId()
   const bancoId = useId()
   const saldoInicialId = useId()
+  const numeroBancoId = useId()
+  const agenciaId = useId()
+  const agenciaDigitoId = useId()
+  const contaNumeroId = useId()
+  const contaDigitoId = useId()
+  const bandeiraId = useId()
+  const numeroCartaoFinalId = useId()
+  const validadeId = useId()
+  const nomeImpressoId = useId()
 
   const carregarDados = async () => {
     setCarregando(true)
@@ -118,6 +136,15 @@ export const ContasPage: React.FC = () => {
     setTipo('conta_corrente')
     setBanco('')
     setSaldoInicial('0,00')
+    setNumeroBanco('')
+    setAgencia('')
+    setAgenciaDigito('')
+    setContaNumero('')
+    setContaDigito('')
+    setBandeira('')
+    setNumeroCartaoFinal('')
+    setValidade('')
+    setNomeImpresso('')
     setErroForm(null)
     setModalCriarEditarAberto(true)
   }
@@ -133,6 +160,15 @@ export const ContasPage: React.FC = () => {
         maximumFractionDigits: 2,
       }),
     )
+    setNumeroBanco(c.numero_banco || '')
+    setAgencia(c.agencia || '')
+    setAgenciaDigito(c.agencia_digito || '')
+    setContaNumero(c.conta || '')
+    setContaDigito(c.conta_digito || '')
+    setBandeira(c.bandeira || '')
+    setNumeroCartaoFinal(c.numero_cartao_final ? c.numero_cartao_final.slice(-4) : '')
+    setValidade(c.validade || '')
+    setNomeImpresso(c.nome_impresso || '')
     setErroForm(null)
     setModalCriarEditarAberto(true)
   }
@@ -155,12 +191,52 @@ export const ContasPage: React.FC = () => {
     setSalvando(true)
     setErroForm(null)
 
+    const dadosEspecificos =
+      tipo === 'conta_corrente' || tipo === 'poupanca'
+        ? {
+            numero_banco: numeroBanco.trim() || null,
+            agencia: agencia.trim() || null,
+            agencia_digito: agenciaDigito.trim() || null,
+            conta: contaNumero.trim() || null,
+            conta_digito: contaDigito.trim() || null,
+            bandeira: null,
+            numero_cartao_final: null,
+            validade: null,
+            nome_impresso: null,
+          }
+        : tipo === 'cartao_credito'
+          ? {
+              numero_banco: null,
+              agencia: null,
+              agencia_digito: null,
+              conta: null,
+              conta_digito: null,
+              bandeira: bandeira.trim() || null,
+              numero_cartao_final: numeroCartaoFinal.trim()
+                ? numeroCartaoFinal.trim().slice(-4)
+                : null,
+              validade: validade.trim() || null,
+              nome_impresso: nomeImpresso.trim() || null,
+            }
+          : {
+              numero_banco: null,
+              agencia: null,
+              agencia_digito: null,
+              conta: null,
+              conta_digito: null,
+              bandeira: null,
+              numero_cartao_final: null,
+              validade: null,
+              nome_impresso: null,
+            }
+
     if (contaEmEdicao) {
       const { error } = await contasService.atualizar(contaEmEdicao.id, {
         nome: nome.trim(),
         tipo,
         banco: banco.trim() || null,
         saldo_inicial: saldoNum,
+        ...dadosEspecificos,
       })
       if (error) {
         setErroForm(error.message)
@@ -175,6 +251,7 @@ export const ContasPage: React.FC = () => {
         tipo,
         banco: banco.trim() || null,
         saldo_inicial: saldoNum,
+        ...dadosEspecificos,
       })
       if (error) {
         setErroForm(error.message)
@@ -359,6 +436,65 @@ export const ContasPage: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Detalhes de Identificação da Conta / Cartão */}
+                  {(conta.tipo === 'conta_corrente' || conta.tipo === 'poupanca') &&
+                    (conta.agencia || conta.conta || conta.numero_banco) && (
+                      <div className="text-[11px] text-texto-apoio bg-verde-menta/20 rounded-lg p-2 space-y-0.5">
+                        {conta.numero_banco && (
+                          <div>
+                            <span className="font-semibold text-texto-principal">Cód. Banco:</span>{' '}
+                            {conta.numero_banco}
+                          </div>
+                        )}
+                        {(conta.agencia || conta.agencia_digito) && (
+                          <div>
+                            <span className="font-semibold text-texto-principal">Agência:</span>{' '}
+                            {conta.agencia}
+                            {conta.agencia_digito ? `-${conta.agencia_digito}` : ''}
+                          </div>
+                        )}
+                        {(conta.conta || conta.conta_digito) && (
+                          <div>
+                            <span className="font-semibold text-texto-principal">Conta:</span>{' '}
+                            {conta.conta}
+                            {conta.conta_digito ? `-${conta.conta_digito}` : ''}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                  {conta.tipo === 'cartao_credito' &&
+                    (conta.bandeira || conta.numero_cartao_final || conta.validade) && (
+                      <div className="text-[11px] text-texto-apoio bg-verde-menta/20 rounded-lg p-2 space-y-0.5">
+                        {conta.bandeira && (
+                          <div>
+                            <span className="font-semibold text-texto-principal">Bandeira:</span>{' '}
+                            {conta.bandeira}
+                          </div>
+                        )}
+                        {conta.numero_cartao_final && (
+                          <div>
+                            <span className="font-semibold text-texto-principal">
+                              Cartão final:
+                            </span>{' '}
+                            •••• {conta.numero_cartao_final}
+                          </div>
+                        )}
+                        {conta.validade && (
+                          <div>
+                            <span className="font-semibold text-texto-principal">Validade:</span>{' '}
+                            {conta.validade}
+                          </div>
+                        )}
+                        {conta.nome_impresso && (
+                          <div>
+                            <span className="font-semibold text-texto-principal">Titular:</span>{' '}
+                            {conta.nome_impresso}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                   <div className="pt-2 border-t border-verde-menta/60 flex items-end justify-between">
                     <div>
                       <span className="block text-[11px] font-medium text-texto-apoio">
@@ -492,6 +628,200 @@ export const ContasPage: React.FC = () => {
               Saldo de partida antes do registro dos novos lançamentos no My Finance IA.
             </p>
           </div>
+
+          {/* Campos Específicos: Conta Corrente / Poupança */}
+          {(tipo === 'conta_corrente' || tipo === 'poupanca') && (
+            <div className="p-3.5 rounded-xl bg-verde-menta/15 border border-verde-menta/50 space-y-3 animate-fade-in">
+              <p className="text-xs font-semibold text-verde-floresta flex items-center gap-1.5">
+                <Building2 className="h-4 w-4" />
+                <span>Dados Bancários (Opcional)</span>
+              </p>
+
+              <div>
+                <label
+                  htmlFor={numeroBancoId}
+                  className="block text-[11px] font-semibold text-texto-principal mb-1"
+                >
+                  Código / Número do Banco
+                </label>
+                <input
+                  id={numeroBancoId}
+                  type="text"
+                  placeholder="Ex: 341 para Itaú, 001 para BB, 237 para Bradesco"
+                  value={numeroBanco}
+                  onChange={(e) => setNumeroBanco(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-verde-menta bg-white text-xs text-texto-principal focus:outline-none focus:ring-2 focus:ring-verde-sage transition-all"
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-2">
+                  <label
+                    htmlFor={agenciaId}
+                    className="block text-[11px] font-semibold text-texto-principal mb-1"
+                  >
+                    Agência
+                  </label>
+                  <input
+                    id={agenciaId}
+                    type="text"
+                    placeholder="Ex: 1234"
+                    value={agencia}
+                    onChange={(e) => setAgencia(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-verde-menta bg-white text-xs text-texto-principal focus:outline-none focus:ring-2 focus:ring-verde-sage transition-all"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor={agenciaDigitoId}
+                    className="block text-[11px] font-semibold text-texto-principal mb-1"
+                  >
+                    Dígito
+                  </label>
+                  <input
+                    id={agenciaDigitoId}
+                    type="text"
+                    placeholder="Ex: 5"
+                    maxLength={2}
+                    value={agenciaDigito}
+                    onChange={(e) => setAgenciaDigito(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-verde-menta bg-white text-xs text-texto-principal focus:outline-none focus:ring-2 focus:ring-verde-sage transition-all text-center"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-2">
+                  <label
+                    htmlFor={contaNumeroId}
+                    className="block text-[11px] font-semibold text-texto-principal mb-1"
+                  >
+                    Número da Conta
+                  </label>
+                  <input
+                    id={contaNumeroId}
+                    type="text"
+                    placeholder="Ex: 56789"
+                    value={contaNumero}
+                    onChange={(e) => setContaNumero(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-verde-menta bg-white text-xs text-texto-principal focus:outline-none focus:ring-2 focus:ring-verde-sage transition-all"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor={contaDigitoId}
+                    className="block text-[11px] font-semibold text-texto-principal mb-1"
+                  >
+                    Dígito
+                  </label>
+                  <input
+                    id={contaDigitoId}
+                    type="text"
+                    placeholder="Ex: 0"
+                    maxLength={2}
+                    value={contaDigito}
+                    onChange={(e) => setContaDigito(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-verde-menta bg-white text-xs text-texto-principal focus:outline-none focus:ring-2 focus:ring-verde-sage transition-all text-center"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Campos Específicos: Cartão de Crédito */}
+          {tipo === 'cartao_credito' && (
+            <div className="p-3.5 rounded-xl bg-verde-menta/15 border border-verde-menta/50 space-y-3 animate-fade-in">
+              <p className="text-xs font-semibold text-verde-floresta flex items-center gap-1.5">
+                <CreditCard className="h-4 w-4" />
+                <span>Identificação do Cartão de Crédito</span>
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label
+                    htmlFor={bandeiraId}
+                    className="block text-[11px] font-semibold text-texto-principal mb-1"
+                  >
+                    Bandeira
+                  </label>
+                  <input
+                    id={bandeiraId}
+                    type="text"
+                    placeholder="Ex: Visa, Mastercard, Elo"
+                    value={bandeira}
+                    onChange={(e) => setBandeira(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-verde-menta bg-white text-xs text-texto-principal focus:outline-none focus:ring-2 focus:ring-verde-sage transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={numeroCartaoFinalId}
+                    className="block text-[11px] font-semibold text-texto-principal mb-1"
+                  >
+                    Últimos 4 Dígitos do Cartão
+                  </label>
+                  <input
+                    id={numeroCartaoFinalId}
+                    type="text"
+                    maxLength={4}
+                    placeholder="Apenas últimos 4 dígitos"
+                    value={numeroCartaoFinal}
+                    onChange={(e) =>
+                      setNumeroCartaoFinal(e.target.value.replace(/\D/g, '').slice(0, 4))
+                    }
+                    className="w-full px-3 py-2 rounded-lg border border-verde-menta bg-white text-xs font-mono text-texto-principal focus:outline-none focus:ring-2 focus:ring-verde-sage transition-all"
+                  />
+                  <span className="text-[10px] text-texto-apoio mt-0.5 block">
+                    🔒 Segurança: informe apenas os 4 dígitos finais.
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label
+                    htmlFor={validadeId}
+                    className="block text-[11px] font-semibold text-texto-principal mb-1"
+                  >
+                    Validade
+                  </label>
+                  <input
+                    id={validadeId}
+                    type="text"
+                    maxLength={5}
+                    placeholder="MM/AA"
+                    value={validade}
+                    onChange={(e) => {
+                      let val = e.target.value.replace(/[^\d/]/g, '')
+                      if (val.length === 2 && !val.includes('/') && !validade.includes('/')) {
+                        val = val + '/'
+                      }
+                      setValidade(val.slice(0, 5))
+                    }}
+                    className="w-full px-3 py-2 rounded-lg border border-verde-menta bg-white text-xs text-texto-principal focus:outline-none focus:ring-2 focus:ring-verde-sage transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor={nomeImpressoId}
+                    className="block text-[11px] font-semibold text-texto-principal mb-1"
+                  >
+                    Nome Impresso no Cartão
+                  </label>
+                  <input
+                    id={nomeImpressoId}
+                    type="text"
+                    placeholder="Como consta no cartão"
+                    value={nomeImpresso}
+                    onChange={(e) => setNomeImpresso(e.target.value.toUpperCase())}
+                    className="w-full px-3 py-2 rounded-lg border border-verde-menta bg-white text-xs uppercase text-texto-principal focus:outline-none focus:ring-2 focus:ring-verde-sage transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-verde-menta">
             <Botao

@@ -17,6 +17,7 @@ import ImportacaoPage from './pages/Importacao'
 import MetasPage from './pages/Metas'
 import ModuloEmBreve from './pages/ModuloEmBreve'
 import NotFound from './pages/NotFound'
+import ErrorBoundary from './components/ErrorBoundary'
 
 const App: React.FC = () => {
   return (
@@ -51,8 +52,22 @@ const App: React.FC = () => {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/contas" element={<ContasPage />} />
               <Route path="/lancamentos" element={<LancamentosPage />} />
-              <Route path="/importacao" element={<ImportacaoPage />} />
-              <Route path="/extratos" element={<ImportacaoPage />} />
+              <Route
+                path="/importacao"
+                element={
+                  <ErrorBoundary fallbackTitle="Algo deu errado ao carregar a página de importação.">
+                    <ImportacaoPage />
+                  </ErrorBoundary>
+                }
+              />
+              <Route
+                path="/extratos"
+                element={
+                  <ErrorBoundary fallbackTitle="Algo deu errado ao carregar a página de importação.">
+                    <ImportacaoPage />
+                  </ErrorBoundary>
+                }
+              />
               <Route path="/metas" element={<MetasPage />} />
               <Route
                 path="/dividas"

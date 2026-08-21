@@ -24,6 +24,15 @@ export interface Conta {
   tipo: TipoConta
   banco: string | null
   saldo_inicial: number
+  numero_banco?: string | null
+  agencia?: string | null
+  agencia_digito?: string | null
+  conta?: string | null
+  conta_digito?: string | null
+  bandeira?: string | null
+  numero_cartao_final?: string | null
+  validade?: string | null
+  nome_impresso?: string | null
   created_at: string
   updated_at: string
 }

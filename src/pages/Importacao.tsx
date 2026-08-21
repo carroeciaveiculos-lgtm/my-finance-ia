@@ -61,22 +61,53 @@ export const ImportacaoPage: React.FC = () => {
 
   const carregarDadosIniciais = async () => {
     setCarregando(true)
-    const [resContas, resCats, resDocs] = await Promise.all([
-      contasService.listar(),
-      categoriasService.listarArvore(),
-      documentosService.listar(),
-    ])
+    try {
+      const [resContas, resCats, resDocs] = await Promise.all([
+        contasService.listar(),
+        categoriasService.listarArvore(),
+        documentosService.listar(),
+      ])
 
-    if (resContas.data) {
-      setContas(resContas.data)
-      if (resContas.data.length > 0 && !contaSelecionadaId) {
-        setContaSelecionadaId(resContas.data[0].id)
+      if (resContas.error) {
+        console.warn('Aviso ao carregar contas:', resContas.error.message)
       }
-    }
-    if (resCats.data) setCategorias(resCats.data)
-    if (resDocs.data) setHistoricoDocumentos(resDocs.data)
+      if (resCats.error) {
+        console.warn('Aviso ao carregar categorias:', resCats.error.message)
+      }
+      if (resDocs.error) {
+        console.warn('Aviso ao carregar documentos:', resDocs.error.message)
+      }
 
-    setCarregando(false)
+      if (resContas.data) {
+        setContas(resContas.data)
+        if (resContas.data.length > 0) {
+          setContaSelecionadaId((prev) => (prev ? prev : resContas.data![0].id))
+        }
+      } else {
+        setContas([])
+      }
+
+      if (resCats.data) {
+        setCategorias(resCats.data)
+      } else {
+        setCategorias([])
+      }
+
+      if (resDocs.data) {
+        setHistoricoDocumentos(resDocs.data)
+      } else {
+        setHistoricoDocumentos([])
+      }
+    } catch (err: unknown) {
+      console.error('Erro no carregamento inicial de importação:', err)
+      toast({
+        title: 'Erro ao carregar dados da página',
+        description: (err as Error).message || 'Tente recarregar a página.',
+        variant: 'destructive',
+      })
+    } finally {
+      setCarregando(false)
+    }
   }
 
   useEffect(() => {
@@ -534,7 +565,18 @@ export const ImportacaoPage: React.FC = () => {
                   </thead>
                   <tbody className="divide-y divide-verde-menta/40">
                     {historicoDocumentos.map((doc) => {
-                      const dataFormatada = new Date(doc.created_at).toLocaleString('pt-BR')
+                      let dataFormatada = '—'
+                      try {
+                        if (doc.created_at) {
+                          const dt = new Date(doc.created_at)
+                          dataFormatada = !isNaN(dt.getTime())
+                            ? dt.toLocaleString('pt-BR')
+                            : doc.created_at
+                        }
+                      } catch {
+                        dataFormatada = '—'
+                      }
+
                       return (
                         <tr key={doc.id} className="hover:bg-verde-menta/10">
                           <td className="py-2.5 px-4 tabular-nums text-texto-apoio">
@@ -542,14 +584,16 @@ export const ImportacaoPage: React.FC = () => {
                           </td>
                           <td className="py-2.5 px-4 font-medium text-texto-principal flex items-center gap-2">
                             {doc.tipo === 'pdf' ? (
-                              <FileText className="h-4 w-4 text-vermelho-suave" />
+                              <FileText className="h-4 w-4 text-vermelho-suave shrink-0" />
                             ) : (
-                              <FileSpreadsheet className="h-4 w-4 text-verde-sucesso" />
+                              <FileSpreadsheet className="h-4 w-4 text-verde-sucesso shrink-0" />
                             )}
-                            <span>{doc.nome_arquivo}</span>
+                            <span className="truncate max-w-[200px] sm:max-w-xs">
+                              {doc.nome_arquivo || 'Arquivo sem nome'}
+                            </span>
                           </td>
                           <td className="py-2.5 px-4 uppercase text-texto-apoio font-semibold">
-                            {doc.tipo}
+                            {doc.tipo || '—'}
                           </td>
                           <td className="py-2.5 px-4">
                             <span
@@ -737,7 +781,7 @@ export const ImportacaoPage: React.FC = () => {
 
                         {/* Data */}
                         <td className="py-3 px-3 whitespace-nowrap tabular-nums text-texto-principal font-medium">
-                          {item.data.split('-').reverse().join('/')}
+                          {item.data ? item.data.split('-').reverse().join('/') : '—'}
                         </td>
 
                         {/* Descrição */}

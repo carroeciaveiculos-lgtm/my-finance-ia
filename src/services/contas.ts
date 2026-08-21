@@ -35,6 +35,15 @@ export const contasService = {
     tipo: TipoConta
     banco?: string | null
     saldo_inicial?: number
+    numero_banco?: string | null
+    agencia?: string | null
+    agencia_digito?: string | null
+    conta?: string | null
+    conta_digito?: string | null
+    bandeira?: string | null
+    numero_cartao_final?: string | null
+    validade?: string | null
+    nome_impresso?: string | null
   }): Promise<{ data: Conta | null; error: Error | null }> {
     try {
       const {
@@ -50,6 +59,17 @@ export const contasService = {
           tipo: conta.tipo,
           banco: conta.banco || null,
           saldo_inicial: conta.saldo_inicial ?? 0,
+          numero_banco: conta.numero_banco || null,
+          agencia: conta.agencia || null,
+          agencia_digito: conta.agencia_digito || null,
+          conta: conta.conta || null,
+          conta_digito: conta.conta_digito || null,
+          bandeira: conta.bandeira || null,
+          numero_cartao_final: conta.numero_cartao_final
+            ? conta.numero_cartao_final.slice(-4)
+            : null,
+          validade: conta.validade || null,
+          nome_impresso: conta.nome_impresso || null,
         })
         .select()
         .single()
