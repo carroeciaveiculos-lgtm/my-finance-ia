@@ -404,14 +404,13 @@ export const ImportacaoPage: React.FC = () => {
 
         const { error } = await lancamentosService.criar({
           conta_id: contaDestinoId,
-          categoria_id: item.categoria_id || null,
-          subcategoria_id: item.subcategoria_id || null,
+          categoria_id: item.categoria_id || undefined,
+          subcategoria_id: item.subcategoria_id || undefined,
           tipo: item.tipo,
           valor: item.valor,
           data: item.data,
           descricao: item.descricao,
-          origem: 'importacao',
-          documento_id: documentoId,
+          documento_id: documentoId || undefined,
         })
 
         if (!error) {

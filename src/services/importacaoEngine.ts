@@ -1,43 +1,84 @@
-import type { Lancamento, Categoria, TipoLancamento } from '@/types'
-import type { ParsedItem } from './importacaoParser'
+import { supabase } from '@/lib/supabase/client'
+import type {
+  Categoria,
+  TipoLancamento,
+  DocumentoImportado,
+  LancamentoImportadoPrevia,
+  ResultadoImportacao,
+} from '@/types'
+import { lancamentosService } from '@/services/lancamentos'
+import { documentosService } from '@/services/documentos'
+import { parseCSV, parseXLSX, parsePDF, type ParsedItem } from '@/services/importacaoParser'
 
 export type GrupoPrevia = 'vai_lancar' | 'ja_existe' | 'precisa_revisao'
 
 export interface ItemPreviaImportacao {
-  idTemp: string
-  data: string // YYYY-MM-DD
-  descricao: string
-  valor: number
-  tipo: TipoLancamento
+  item: ParsedItem
   grupo: GrupoPrevia
-  motivoGrupo: string
-  categoria_id: string | null
-  subcategoria_id: string | null
-  categoriaNomeSugerida?: string
-  subcategoriaNomeSugerida?: string
-  duplicataCorrespondente?: Lancamento
-  selecionadoParaSalvar: boolean
+  motivo: string
+  duplicataExataDe?: string
+  duplicataParcialDe?: string
+  categoria_id?: string | null
+  subcategoria_id?: string | null
+  categoriaSugeridaId?: string | null
+  subcategoriaSugeridaId?: string | null
+  categoriaNomeSugerida?: string | null
+  sugestaoFonte?: 'historico_exato' | 'nenhuma'
+  selecionadoParaSalvar?: boolean
 }
 
 /**
- * Normaliza strings para comparação case-insensitive, sem espaços duplicados e sem acentos
+ * Normaliza strings para comparação estrita (lowercase, sem acentos, sem pontuação irrelevante).
  */
 export function normalizarTexto(texto: string | null | undefined): string {
   if (!texto) return ''
   return texto
     .toLowerCase()
-    .trim()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, ' ')
     .replace(/\s+/g, ' ')
+    .trim()
 }
 
 /**
- * Processa a lista de itens extraídos do documento contra os lançamentos existentes no banco do usuário.
- * Aplica:
- * 1. Deduplicação estrita (100% data + valor + descrição normalizada)
- * 2. Detecção de correspondência parcial / incerteza (precisa de revisão)
- * 3. Auto-categorização estrita por histórico idêntico (nunca chuta)
+ * Parser simples de OFX para extração de transações
+ */
+export function parseOFXSimples(content: string): ParsedItem[] {
+  const items: ParsedItem[] = []
+  const stmtTrnMatches = content.match(/<STMTTRN>([\s\S]*?)<\/STMTTRN>/gi) || []
+
+  for (const trn of stmtTrnMatches) {
+    const trntype = trn.match(/<TRNTYPE>([^<\r\n]+)/i)?.[1]?.trim()
+    const dtposted = trn.match(/<DTPOSTED>([^<\r\n]+)/i)?.[1]?.trim()
+    const trnamt = trn.match(/<TRNAMT>([^<\r\n]+)/i)?.[1]?.trim()
+    const memo =
+      trn.match(/<MEMO>([^<\r\n]+)/i)?.[1]?.trim() ||
+      trn.match(/<NAME>([^<\r\n]+)/i)?.[1]?.trim() ||
+      'Transação OFX'
+
+    if (dtposted && trnamt) {
+      const ano = dtposted.slice(0, 4)
+      const mes = dtposted.slice(4, 6)
+      const dia = dtposted.slice(6, 8)
+      const dataIso = `${ano}-${mes}-${dia}`
+      const valorNum = parseFloat(trnamt.replace(',', '.'))
+      const isDebito = valorNum < 0 || trntype === 'DEBIT'
+
+      items.push({
+        data: dataIso,
+        descricao: memo,
+        valor: Math.abs(valorNum),
+        tipo: isDebito ? 'despesa' : 'receita',
+      })
+    }
+  }
+
+  return items
+}
+
+/**
+ * Classifica e auto-categoriza itens extraídos.
  */
 export function classificarEAutoCategorizar({
   itensExtraidos,
@@ -45,137 +86,203 @@ export function classificarEAutoCategorizar({
   categorias,
 }: {
   itensExtraidos: ParsedItem[]
-  lancamentosExistentes: Lancamento[]
+  lancamentosExistentes: Array<{
+    id: string
+    data: string
+    valor: number
+    tipo: TipoLancamento
+    descricao?: string | null
+    categoria_id?: string | null
+    subcategoria_id?: string | null
+  }>
   categorias: Categoria[]
 }): ItemPreviaImportacao[] {
-  // Mapa de histórico para auto-categorização:
-  // Chave: descricao normalizada -> { categoria_id, subcategoria_id }
-  const mapaHistorico = new Map<string, { categoria_id: string; subcategoria_id: string | null }>()
+  // Mapa de histórico por descrição idêntica
+  const historicoPorDescricao: Record<
+    string,
+    { categoria_id?: string | null; subcategoria_id?: string | null }
+  > = {}
 
-  // Popula mapa a partir de lançamentos existentes que já tenham categoria definida
   for (const lanc of lancamentosExistentes) {
-    if (lanc.descricao && lanc.categoria_id) {
-      const chave = normalizarTexto(lanc.descricao)
-      if (chave && !mapaHistorico.has(chave)) {
-        mapaHistorico.set(chave, {
-          categoria_id: lanc.categoria_id,
-          subcategoria_id: lanc.subcategoria_id || null,
-        })
+    const descNorm = normalizarTexto(lanc.descricao)
+    if (descNorm && lanc.subcategoria_id) {
+      historicoPorDescricao[descNorm] = {
+        categoria_id: lanc.categoria_id,
+        subcategoria_id: lanc.subcategoria_id,
       }
     }
   }
 
-  // Mapa rápido de busca de categorias por ID
-  const mapaCategorias = new Map<string, Categoria>()
-  for (const cat of categorias) {
-    mapaCategorias.set(cat.id, cat)
-  }
-
-  return itensExtraidos.map((item, idx) => {
-    const idTemp = `item-previa-${idx}-${Date.now()}`
+  return itensExtraidos.map((item) => {
     const descNorm = normalizarTexto(item.descricao)
-    const valorNum = Number(item.valor.toFixed(2))
+    const valorItem = Math.round(item.valor * 100) / 100
 
-    // 1. Verificar duplicata exata (100% de certeza: mesma data, mesmo valor com precisão e mesma descrição)
+    // 1. Checa duplicidade exata
     const duplicataExata = lancamentosExistentes.find((existente) => {
-      const dataBate = existente.data === item.data
-      const valorBate = Math.abs(Number(existente.valor) - valorNum) < 0.009
-      const descBate = normalizarTexto(existente.descricao) === descNorm
-      return dataBate && valorBate && descBate
+      const valorExistente = Math.round(Number(existente.valor) * 100) / 100
+      return (
+        existente.data === item.data &&
+        valorExistente === valorItem &&
+        existente.tipo === item.tipo &&
+        normalizarTexto(existente.descricao) === descNorm
+      )
     })
 
     if (duplicataExata) {
       return {
-        idTemp,
-        data: item.data,
-        descricao: item.descricao,
-        valor: valorNum,
-        tipo: item.tipo,
+        item,
         grupo: 'ja_existe',
-        motivoGrupo: 'Lançamento já existe no banco com mesma data, valor e descrição exata.',
-        categoria_id: duplicataExata.categoria_id,
-        subcategoria_id: duplicataExata.subcategoria_id,
-        duplicataCorrespondente: duplicataExata,
-        selecionadoParaSalvar: false, // Não duplicar por padrão
-      }
-    }
-
-    // 2. Verificar correspondência parcial / duvidosa (mesma data e mesmo valor, porém descrição levemente diferente)
-    const correspondenciaParcial = lancamentosExistentes.find((existente) => {
-      const dataBate = existente.data === item.data
-      const valorBate = Math.abs(Number(existente.valor) - valorNum) < 0.009
-      return dataBate && valorBate
-    })
-
-    // 3. Tentar auto-categorização estrita por histórico anterior
-    let categoriaId: string | null = null
-    let subcategoriaId: string | null = null
-    let categoriaNomeSugerida: string | undefined
-    let subcategoriaNomeSugerida: string | undefined
-
-    const categoriaHistorico = descNorm ? mapaHistorico.get(descNorm) : undefined
-    if (categoriaHistorico) {
-      categoriaId = categoriaHistorico.categoria_id
-      subcategoriaId = categoriaHistorico.subcategoria_id
-      const catObj = mapaCategorias.get(categoriaId)
-      if (catObj) categoriaNomeSugerida = catObj.nome
-      if (subcategoriaId) {
-        const subCatObj = mapaCategorias.get(subcategoriaId)
-        if (subCatObj) subcategoriaNomeSugerida = subCatObj.nome
-      }
-    }
-
-    // Se houver correspondência parcial de valor/data com outro lançamento existente, colocar em revisão
-    if (correspondenciaParcial) {
-      return {
-        idTemp,
-        data: item.data,
-        descricao: item.descricao,
-        valor: valorNum,
-        tipo: item.tipo,
-        grupo: 'precisa_revisao',
-        motivoGrupo: `Possível duplicata: existe lançamento de R$ ${valorNum.toFixed(2)} em ${item.data} ("${correspondenciaParcial.descricao}"). Verifique antes de lançar.`,
-        categoria_id: categoriaId,
-        subcategoria_id: subcategoriaId,
-        categoriaNomeSugerida,
-        subcategoriaNomeSugerida,
-        duplicataCorrespondente: correspondenciaParcial,
-        selecionadoParaSalvar: true,
-      }
-    }
-
-    // Se o lançamento for totalmente novo, mas NÃO tem categoria encontrada:
-    // Também vai para a lista de "vai_lancar" ou se sem categoria pode ir para "precisa_revisao"
-    if (!categoriaId) {
-      return {
-        idTemp,
-        data: item.data,
-        descricao: item.descricao,
-        valor: valorNum,
-        tipo: item.tipo,
-        grupo: 'precisa_revisao',
-        motivoGrupo:
-          'Sem categoria histórica correspondente. Por favor, categorize manualmente antes de confirmar.',
+        motivo: 'Lançamento idêntico já cadastrado nesta conta (mesma data, valor e descrição)',
+        duplicataExataDe: duplicataExata.id,
         categoria_id: null,
         subcategoria_id: null,
+        categoriaSugeridaId: null,
+        subcategoriaSugeridaId: null,
+        categoriaNomeSugerida: null,
+        selecionadoParaSalvar: false,
+      }
+    }
+
+    // 2. Checa correspondência parcial (mesma data e valor mas descrição diferente)
+    const duplicataParcial = lancamentosExistentes.find((existente) => {
+      const valorExistente = Math.round(Number(existente.valor) * 100) / 100
+      return (
+        existente.data === item.data && valorExistente === valorItem && existente.tipo === item.tipo
+      )
+    })
+
+    if (duplicataParcial) {
+      return {
+        item,
+        grupo: 'precisa_revisao',
+        motivo: `Existe outro lançamento de mesmo valor e data ("${duplicataParcial.descricao || 'Sem descrição'}"). Verifique se é duplicata.`,
+        duplicataParcialDe: duplicataParcial.id,
+        categoria_id: null,
+        subcategoria_id: null,
+        categoriaSugeridaId: null,
+        subcategoriaSugeridaId: null,
+        categoriaNomeSugerida: null,
         selecionadoParaSalvar: true,
       }
     }
 
-    // Caso ideal: Novo lançamento + categoria histórica encontrada
+    // 3. Auto-categorização por histórico idêntico
+    const sugestao = historicoPorDescricao[descNorm]
+    if (sugestao && sugestao.subcategoria_id) {
+      const catObj = categorias.find((c) => c.id === sugestao.categoria_id)
+      const subObj = catObj?.subcategorias?.find((s) => s.id === sugestao.subcategoria_id)
+
+      return {
+        item,
+        grupo: 'vai_lancar',
+        motivo: 'Pronto para importação',
+        categoria_id: sugestao.categoria_id || null,
+        subcategoria_id: sugestao.subcategoria_id || null,
+        categoriaSugeridaId: sugestao.categoria_id || null,
+        subcategoriaSugeridaId: sugestao.subcategoria_id || null,
+        categoriaNomeSugerida: subObj?.nome || catObj?.nome || 'Sugerida',
+        sugestaoFonte: 'historico_exato',
+        selecionadoParaSalvar: true,
+      }
+    }
+
     return {
-      idTemp,
-      data: item.data,
-      descricao: item.descricao,
-      valor: valorNum,
-      tipo: item.tipo,
+      item,
       grupo: 'vai_lancar',
-      motivoGrupo: `Novo lançamento. Categoria "${categoriaNomeSugerida}" identificada pelo histórico.`,
-      categoria_id: categoriaId,
-      subcategoria_id: subcategoriaId,
-      categoriaNomeSugerida,
-      subcategoriaNomeSugerida,
+      motivo: 'Pronto para importação',
+      categoria_id: null,
+      subcategoria_id: null,
+      categoriaSugeridaId: null,
+      subcategoriaSugeridaId: null,
+      categoriaNomeSugerida: null,
       selecionadoParaSalvar: true,
     }
   })
+}
+
+/**
+ * Processa um documento de extrato ou arquivo e retorna os lançamentos classificados
+ */
+export async function processarDocumentoImportado(
+  file: File,
+  contaId: string,
+): Promise<ResultadoImportacao> {
+  const ext = file.name.split('.').pop()?.toLowerCase() || ''
+  let itemsExtraidos: ParsedItem[] = []
+
+  if (ext === 'csv') {
+    const text = await file.text()
+    const parsed = parseCSV(text)
+    itemsExtraidos = parsed.itens || []
+  } else if (ext === 'xlsx' || ext === 'xls') {
+    const buffer = await file.arrayBuffer()
+    const parsed = parseXLSX(buffer)
+    itemsExtraidos = parsed.itens || []
+  } else if (ext === 'pdf') {
+    const buffer = await file.arrayBuffer()
+    const parsed = await parsePDF(buffer)
+    itemsExtraidos = parsed.itens || []
+  } else if (ext === 'ofx') {
+    const text = await file.text()
+    itemsExtraidos = parseOFXSimples(text)
+  }
+
+  // 1. Cria o registro do documento importado no banco
+  let tipoDoc: 'pdf' | 'csv' | 'xls' | 'xlsx' | 'ofx' = 'csv'
+  if (['pdf', 'csv', 'xls', 'xlsx', 'ofx'].includes(ext)) {
+    tipoDoc = ext as 'pdf' | 'csv' | 'xls' | 'xlsx' | 'ofx'
+  }
+
+  const { data: docCriado } = await documentosService.criar({
+    nome_arquivo: file.name,
+    tipo: tipoDoc,
+    conta_id: contaId || null,
+  })
+
+  // 2. Busca lançamentos existentes para checar duplicados e categorias para auto-categorização
+  const [resLancamentos, resCategorias] = await Promise.all([
+    lancamentosService.listar(),
+    supabase.from('categorias').select('*'),
+  ])
+
+  const lancamentosExistentes = (resLancamentos.data || []).map((l) => ({
+    id: l.id,
+    data: l.data,
+    valor: Number(l.valor),
+    tipo: l.tipo,
+    descricao: l.descricao,
+    categoria_id: l.categoria_id,
+    subcategoria_id: l.subcategoria_id,
+  }))
+
+  const listaCategorias = (resCategorias.data as Categoria[]) || []
+
+  // 3. Classifica e gera prévias
+  const itensClassificados = classificarEAutoCategorizar({
+    itensExtraidos: itemsExtraidos,
+    lancamentosExistentes,
+    categorias: listaCategorias,
+  })
+
+  const listaPrevia: LancamentoImportadoPrevia[] = itensClassificados.map((prev, idx) => {
+    const isDuplicado = prev.grupo === 'ja_existe' || prev.grupo === 'precisa_revisao'
+    return {
+      id_temporario: `temp-${idx}-${Date.now()}`,
+      data: prev.item.data,
+      descricao: prev.item.descricao,
+      valor: prev.item.valor,
+      tipo: prev.item.tipo as 'receita' | 'despesa',
+      categoria_id: prev.categoriaSugeridaId || null,
+      subcategoria_id: prev.subcategoriaSugeridaId || null,
+      sugestao_ia: prev.sugestaoFonte === 'historico_exato',
+      duplicado_provavel: isDuplicado,
+      ignorar: prev.grupo === 'ja_existe',
+    }
+  })
+
+  return {
+    documento: docCriado,
+    lancamentos: listaPrevia,
+    total_extraidos: listaPrevia.length,
+  }
 }

@@ -25,7 +25,8 @@ export function formatCurrency(value: number): string {
 export function formatarData(date: string | Date | null | undefined): string {
   if (!date) return ''
   try {
-    const d = typeof date === 'string' ? new Date(date.includes('T') ? date : `${date}T12:00:00`) : date
+    const d =
+      typeof date === 'string' ? new Date(date.includes('T') ? date : `${date}T12:00:00`) : date
     if (isNaN(d.getTime())) return String(date)
     return new Intl.DateTimeFormat('pt-BR').format(d)
   } catch {
