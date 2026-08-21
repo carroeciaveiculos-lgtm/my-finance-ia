@@ -16,8 +16,55 @@ export interface ParseResult {
   totalLinhasLidas?: number
 }
 
+export const COLUNAS_ESPERADAS_AJUDA = {
+  data: [
+    'Data',
+    'Dt.',
+    'Dt',
+    'Data do Movimento',
+    'Data Lançamento',
+    'Data Pagamento',
+    'Data Compra',
+    'Data Movimento',
+    'Data de Lançamento',
+    'Data do Lançamento',
+    'Date',
+    'Dia',
+  ],
+  valor: [
+    'Valor',
+    'Valor (R$)',
+    'Valor R$',
+    'Valor (R)',
+    'Crédito/Débito',
+    'Débito',
+    'Crédito',
+    'Saldo',
+    'Valor da Operação',
+    'Valor Líquido',
+    'Entrada',
+    'Saída',
+    'Amount',
+    'Quantia',
+  ],
+  descricao: [
+    'Descrição',
+    'Descricao',
+    'Histórico',
+    'Histórico do Lançamento',
+    'Lançamento',
+    'Texto',
+    'Memorando',
+    'Detalhes',
+    'Complemento',
+    'Estabelecimento',
+    'Título',
+    'Memo',
+  ],
+}
+
 /**
- * Normaliza data de múltiplos formatos (DD/MM/YYYY, YYYY-MM-DD, DD-MM-YYYY, timestamp ou número de série do Excel) para YYYY-MM-DD
+ * Normaliza data de múltiplos formatos (DD/MM/YYYY, YYYY-MM-DD, DD-MM-YYYY, DD.MM.YYYY, timestamp ou número de série do Excel) para YYYY-MM-DD
  */
 export function normalizarData(val: unknown): string | null {
   if (val === null || val === undefined || val === '') return null
@@ -39,13 +86,17 @@ export function normalizarData(val: unknown): string | null {
   const str = String(val).trim()
   if (!str) return null
 
-  // Formato ISO: YYYY-MM-DD ou YYYY/MM/DD
+  // Formato ISO: YYYY-MM-DD ou YYYY/MM/DD ou YYYY.MM.DD
   const isoMatch = str.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/)
   if (isoMatch) {
     const y = isoMatch[1]
     const m = isoMatch[2].padStart(2, '0')
     const d = isoMatch[3].padStart(2, '0')
-    return `${y}-${m}-${d}`
+    const monthNum = parseInt(m, 10)
+    const dayNum = parseInt(d, 10)
+    if (monthNum >= 1 && monthNum <= 12 && dayNum >= 1 && dayNum <= 31) {
+      return `${y}-${m}-${d}`
+    }
   }
 
   // Formato Brasileiro: DD/MM/YYYY ou DD-MM-YYYY ou DD.MM.YYYY
@@ -59,7 +110,11 @@ export function normalizarData(val: unknown): string | null {
       const prefix = String(currentYear).slice(0, 2)
       y = `${prefix}${y}`
     }
-    return `${y}-${m}-${d}`
+    const monthNum = parseInt(m, 10)
+    const dayNum = parseInt(d, 10)
+    if (monthNum >= 1 && monthNum <= 12 && dayNum >= 1 && dayNum <= 31) {
+      return `${y}-${m}-${d}`
+    }
   }
 
   return null
@@ -83,7 +138,12 @@ export function normalizarValor(
     return {
       valor: Math.abs(Number(val.toFixed(2))),
       tipo:
-        tipoForcado?.toLowerCase().includes('desp') || tipoForcado?.toLowerCase() === 'd'
+        tipoForcado?.toLowerCase().includes('desp') ||
+        tipoForcado?.toLowerCase() === 'd' ||
+        tipoForcado?.toLowerCase() === 'debito' ||
+        tipoForcado?.toLowerCase() === 'débito' ||
+        tipoForcado?.toLowerCase() === 'saida' ||
+        tipoForcado?.toLowerCase() === 'saída'
           ? 'despesa'
           : 'receita',
     }
@@ -161,15 +221,320 @@ export function normalizarValor(
 }
 
 /**
- * Parser inteligente de CSV: detecta delimitador (; , ou \t) e mapeia colunas
+ * Normaliza strings de cabeçalho para comparação flexível
+ */
+export function normalizarHeader(texto: string | null | undefined): string {
+  if (!texto) return ''
+  return texto
+    .toLowerCase()
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '')
+}
+
+/**
+ * Verifica se um texto de cabeçalho corresponde a Data
+ */
+function isDataHeader(norm: string): boolean {
+  if (!norm) return false
+  const keywords = [
+    'data',
+    'dt',
+    'datadomovimento',
+    'datalancamento',
+    'datapagamento',
+    'datacompra',
+    'datamovimento',
+    'datadelancamento',
+    'datadolancamento',
+    'date',
+    'dia',
+  ]
+  return keywords.some((k) => norm === k || norm.startsWith('data') || norm.includes('data'))
+}
+
+/**
+ * Verifica se um texto de cabeçalho corresponde a Descrição
+ */
+function isDescricaoHeader(norm: string): boolean {
+  if (!norm) return false
+  const keywords = [
+    'descricao',
+    'desc',
+    'historico',
+    'historicodolancamento',
+    'lancamento',
+    'texto',
+    'memorando',
+    'detalhes',
+    'detalhe',
+    'complemento',
+    'memo',
+    'estabelecimento',
+    'titulo',
+    'nome',
+    'narrativa',
+    'motivo',
+  ]
+  return keywords.some((k) => norm === k || norm.includes('historico') || norm.includes('desc'))
+}
+
+/**
+ * Verifica se um texto de cabeçalho corresponde a Valor único
+ */
+function isValorHeader(norm: string): boolean {
+  if (!norm) return false
+  const keywords = [
+    'valor',
+    'valorr',
+    'valorbrl',
+    'creditodebito',
+    'debitocredito',
+    'valordaoperacao',
+    'valorliquido',
+    'amount',
+    'quantia',
+    'vlr',
+    'saldo',
+    'total',
+  ]
+  return keywords.some((k) => norm === k || (norm.startsWith('valor') && !norm.includes('saldo')))
+}
+
+/**
+ * Verifica se um texto de cabeçalho é de Débito/Saída
+ */
+function isDebitoHeader(norm: string): boolean {
+  if (!norm) return false
+  const keywords = [
+    'debito',
+    'debitos',
+    'saida',
+    'saidas',
+    'despesa',
+    'despesas',
+    'deb',
+    'pagamento',
+  ]
+  return keywords.some((k) => norm === k || norm.startsWith('debito') || norm.startsWith('saida'))
+}
+
+/**
+ * Verifica se um texto de cabeçalho é de Crédito/Entrada
+ */
+function isCreditoHeader(norm: string): boolean {
+  if (!norm) return false
+  const keywords = ['credito', 'creditos', 'entrada', 'entradas', 'receita', 'receitas', 'cred']
+  return keywords.some(
+    (k) => norm === k || norm.startsWith('credito') || norm.startsWith('entrada'),
+  )
+}
+
+/**
+ * Divide linha respeitando delimitador e aspas
+ */
+export function splitCsvLine(line: string, delimiter: string): string[] {
+  const result: string[] = []
+  let current = ''
+  let inQuotes = false
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]
+    if (char === '"' || char === "'") {
+      inQuotes = !inQuotes
+    } else if (char === delimiter && !inQuotes) {
+      result.push(current.trim().replace(/^["']|["']$/g, ''))
+      current = ''
+    } else {
+      current += char
+    }
+  }
+  result.push(current.trim().replace(/^["']|["']$/g, ''))
+  return result
+}
+
+/**
+ * Detecta o melhor delimitador para um texto CSV
+ */
+export function detectarDelimitador(linhas: string[]): string {
+  const delimiters = [';', ',', '\t', '|']
+  const score: Record<string, number> = { ';': 0, ',': 0, '\t': 0, '|': 0 }
+
+  const linhasParaTestar = linhas.slice(0, Math.min(linhas.length, 10))
+
+  for (const delim of delimiters) {
+    let colCounts: number[] = []
+    for (const linha of linhasParaTestar) {
+      const cols = splitCsvLine(linha, delim)
+      if (cols.length > 1) {
+        colCounts.push(cols.length)
+      }
+    }
+    if (colCounts.length > 0) {
+      // Se a contagem de colunas for consistente entre as linhas, ganha mais pontos
+      const firstCount = colCounts[0]
+      const consistent = colCounts.filter((c) => c === firstCount).length
+      score[delim] = colCounts.reduce((a, b) => a + b, 0) + consistent * 5
+    }
+  }
+
+  let melhorDelim = ';'
+  let maiorScore = -1
+
+  for (const delim of delimiters) {
+    if (score[delim] > maiorScore) {
+      maiorScore = score[delim]
+      melhorDelim = delim
+    }
+  }
+
+  return maiorScore > 0 ? melhorDelim : ';'
+}
+
+/**
+ * Gera mensagem de erro amigável e detalhada
+ */
+export function gerarMensagemErroLayout(): string {
+  return (
+    'Não foi possível reconhecer o layout deste extrato bancário. ' +
+    'Certifique-se de que o arquivo contenha colunas de Data (ex.: "Data", "Dt.", "Data do Movimento") ' +
+    'e Valor (ex.: "Valor", "Valor (R$)" ou colunas separadas de "Débito" e "Crédito"). ' +
+    'Sugerimos exportar o extrato em formato XLSX ou CSV direto pelo Internet Banking/app do seu banco, ' +
+    'ou se preferir, registrar o lançamento manualmente.'
+  )
+}
+
+interface ColunasMapeadas {
+  dataIdx: number
+  descIdx: number
+  valorIdx: number
+  debitoIdx: number
+  creditoIdx: number
+  tipoIdx: number
+}
+
+/**
+ * Tenta mapear colunas a partir de um array de strings de cabeçalho
+ */
+function mapearColunas(headers: string[]): ColunasMapeadas {
+  const normHeaders = headers.map(normalizarHeader)
+
+  let dataIdx = -1
+  let descIdx = -1
+  let valorIdx = -1
+  let debitoIdx = -1
+  let creditoIdx = -1
+  let tipoIdx = -1
+
+  for (let i = 0; i < normHeaders.length; i++) {
+    const h = normHeaders[i]
+    if (!h) continue
+
+    if (dataIdx === -1 && isDataHeader(h)) {
+      dataIdx = i
+    } else if (debitoIdx === -1 && isDebitoHeader(h)) {
+      debitoIdx = i
+    } else if (creditoIdx === -1 && isCreditoHeader(h)) {
+      creditoIdx = i
+    } else if (valorIdx === -1 && isValorHeader(h)) {
+      valorIdx = i
+    } else if (descIdx === -1 && isDescricaoHeader(h)) {
+      descIdx = i
+    } else if (
+      tipoIdx === -1 &&
+      (h === 'tipo' || h === 'natureza' || h === 'dc' || h === 'type' || h === 'tipolancamento')
+    ) {
+      tipoIdx = i
+    }
+  }
+
+  return { dataIdx, descIdx, valorIdx, debitoIdx, creditoIdx, tipoIdx }
+}
+
+/**
+ * Extrai item estruturado de uma linha mapeada
+ */
+function extrairItemDeLinha(row: (string | unknown)[], cols: ColunasMapeadas): ParsedItem | null {
+  const { dataIdx, descIdx, valorIdx, debitoIdx, creditoIdx, tipoIdx } = cols
+
+  if (dataIdx === -1) return null
+
+  const rawData = row[dataIdx]
+  const dataNorm = normalizarData(rawData)
+  if (!dataNorm) return null
+
+  const rawDesc = descIdx !== -1 && row[descIdx] ? String(row[descIdx]) : 'Lançamento sem descrição'
+  const descNorm = rawDesc.trim() || 'Lançamento sem descrição'
+
+  // Caso 1: Colunas separadas de Débito e Crédito
+  if (debitoIdx !== -1 || creditoIdx !== -1) {
+    const rawDeb = debitoIdx !== -1 ? row[debitoIdx] : null
+    const rawCred = creditoIdx !== -1 ? row[creditoIdx] : null
+
+    const debNorm = normalizarValor(rawDeb, 'debito')
+    const credNorm = normalizarValor(rawCred, 'credito')
+
+    if (debNorm && debNorm.valor > 0) {
+      return {
+        data: dataNorm,
+        descricao: descNorm,
+        valor: debNorm.valor,
+        tipo: 'despesa',
+        rawRow: row as Record<string, unknown> | string[],
+      }
+    }
+
+    if (credNorm && credNorm.valor > 0) {
+      return {
+        data: dataNorm,
+        descricao: descNorm,
+        valor: credNorm.valor,
+        tipo: 'receita',
+        rawRow: row as Record<string, unknown> | string[],
+      }
+    }
+  }
+
+  // Caso 2: Coluna única de Valor
+  if (valorIdx !== -1) {
+    const rawVal = row[valorIdx]
+    const rawTipo = tipoIdx !== -1 ? String(row[tipoIdx]) : undefined
+    const valNorm = normalizarValor(rawVal, rawTipo)
+
+    if (valNorm && valNorm.valor > 0) {
+      return {
+        data: dataNorm,
+        descricao: descNorm,
+        valor: valNorm.valor,
+        tipo: valNorm.tipo,
+        rawRow: row as Record<string, unknown> | string[],
+      }
+    }
+  }
+
+  return null
+}
+
+/**
+ * Parser inteligente de CSV: detecta delimitadores, linhas de cabeçalho extras,
+ * colunas separadas débito/crédito e fallback posicional.
  */
 export function parseCSV(content: string): ParseResult {
+  if (!content || typeof content !== 'string') {
+    return {
+      sucesso: false,
+      itens: [],
+      erro: 'Arquivo CSV vazio ou em formato inválido.',
+    }
+  }
+
   const lines = content
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => l.length > 0)
 
-  if (lines.length < 2) {
+  if (lines.length === 0) {
     return {
       sucesso: false,
       itens: [],
@@ -177,134 +542,106 @@ export function parseCSV(content: string): ParseResult {
     }
   }
 
-  // Detectar delimitador na primeira linha com mais ocorrências
-  const firstLine = lines[0]
-  const countSemicolon = (firstLine.match(/;/g) || []).length
-  const countComma = (firstLine.match(/,/g) || []).length
-  const countTab = (firstLine.match(/\t/g) || []).length
+  const delimiter = detectarDelimitador(lines)
 
-  let delimiter = ','
-  if (countSemicolon >= countComma && countSemicolon >= countTab && countSemicolon > 0) {
-    delimiter = ';'
-  } else if (countTab >= countComma && countTab > 0) {
-    delimiter = '\t'
+  // 1. Encontrar a linha de cabeçalho (pode haver títulos, saldo anterior ou metadados antes)
+  let headerLineIdx = -1
+  let mapeamento: ColunasMapeadas = {
+    dataIdx: -1,
+    descIdx: -1,
+    valorIdx: -1,
+    debitoIdx: -1,
+    creditoIdx: -1,
+    tipoIdx: -1,
   }
 
-  const splitLine = (line: string): string[] => {
-    // Tratamento simples para campos com aspas
-    const result: string[] = []
-    let current = ''
-    let inQuotes = false
+  const maxHeaderSearch = Math.min(lines.length, 15)
+  for (let i = 0; i < maxHeaderSearch; i++) {
+    const row = splitCsvLine(lines[i], delimiter)
+    const m = mapearColunas(row)
+    const hasData = m.dataIdx !== -1
+    const hasValor = m.valorIdx !== -1 || m.debitoIdx !== -1 || m.creditoIdx !== -1
 
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i]
-      if (char === '"' || char === "'") {
-        inQuotes = !inQuotes
-      } else if (char === delimiter && !inQuotes) {
-        result.push(current.trim().replace(/^["']|["']$/g, ''))
-        current = ''
-      } else {
-        current += char
-      }
+    if (hasData && hasValor) {
+      headerLineIdx = i
+      mapeamento = m
+      break
     }
-    result.push(current.trim().replace(/^["']|["']$/g, ''))
-    return result
   }
 
-  const rawHeader = splitLine(lines[0])
-  const headerLower = rawHeader.map((h) =>
-    h
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, ''),
-  )
+  // Se não achou cabeçalho nomeado, tenta deduzir por padrão/posição analisando as primeiras linhas de dados
+  if (headerLineIdx === -1) {
+    for (let i = 0; i < Math.min(lines.length, 5); i++) {
+      const row = splitCsvLine(lines[i], delimiter)
+      let foundData = -1
+      let foundValor = -1
+      let foundDesc = -1
 
-  // Mapear índices
-  const dataIdx = headerLower.findIndex(
-    (h) => h.includes('data') || h.includes('date') || h.includes('dt') || h.includes('dia'),
-  )
-  const descIdx = headerLower.findIndex(
-    (h) =>
-      h.includes('desc') ||
-      h.includes('historico') ||
-      h.includes('histórico') ||
-      h.includes('detalhe') ||
-      h.includes('memo') ||
-      h.includes('estabelecimento') ||
-      h.includes('titulo'),
-  )
-  const valorIdx = headerLower.findIndex(
-    (h) =>
-      h.includes('valor') || h.includes('amount') || h.includes('quantia') || h.includes('vlr'),
-  )
-  const tipoIdx = headerLower.findIndex(
-    (h) =>
-      h.includes('tipo') ||
-      h.includes('type') ||
-      h.includes('natureza') ||
-      h.includes('d/c') ||
-      h.includes('dc'),
-  )
-
-  // Se não encontrar data ou valor por cabeçalho, tenta fallback posicional
-  let finalDataIdx = dataIdx
-  let finalDescIdx = descIdx
-  let finalValorIdx = valorIdx
-  let finalTipoIdx = tipoIdx
-
-  if (finalDataIdx === -1 || finalValorIdx === -1) {
-    // Fallback: tenta deduzir testando primeira linha de dados
-    if (lines.length > 1) {
-      const testRow = splitLine(lines[1])
-      for (let i = 0; i < testRow.length; i++) {
-        if (finalDataIdx === -1 && normalizarData(testRow[i])) {
-          finalDataIdx = i
-        } else if (finalValorIdx === -1 && normalizarValor(testRow[i])) {
-          finalValorIdx = i
+      for (let c = 0; c < row.length; c++) {
+        if (foundData === -1 && normalizarData(row[c])) {
+          foundData = c
+        } else if (foundValor === -1 && normalizarValor(row[c])) {
+          foundValor = c
         }
       }
-      if (finalDescIdx === -1) {
-        // Pega uma coluna que não seja data nem valor
-        for (let i = 0; i < testRow.length; i++) {
-          if (i !== finalDataIdx && i !== finalValorIdx) {
-            finalDescIdx = i
+
+      if (foundData !== -1 && foundValor !== -1) {
+        for (let c = 0; c < row.length; c++) {
+          if (c !== foundData && c !== foundValor && row[c] && isNaN(Number(row[c]))) {
+            foundDesc = c
             break
           }
         }
+        headerLineIdx =
+          i > 0 && isNaN(Number(splitCsvLine(lines[0], delimiter)[foundValor])) ? 0 : -1
+        mapeamento = {
+          dataIdx: foundData,
+          descIdx: foundDesc,
+          valorIdx: foundValor,
+          debitoIdx: -1,
+          creditoIdx: -1,
+          tipoIdx: -1,
+        }
+        break
       }
     }
   }
 
-  if (finalDataIdx === -1 || finalValorIdx === -1) {
+  const hasDataCol = mapeamento.dataIdx !== -1
+  const hasValorCol =
+    mapeamento.valorIdx !== -1 ||
+    (mapeamento.debitoIdx !== -1 && mapeamento.creditoIdx !== -1) ||
+    mapeamento.debitoIdx !== -1 ||
+    mapeamento.creditoIdx !== -1
+
+  if (!hasDataCol || !hasValorCol) {
     return {
       sucesso: false,
       itens: [],
-      erro: 'Não foi possível reconhecer o layout deste arquivo CSV. Certifique-se de que contenha colunas com Data e Valor.',
+      erro: gerarMensagemErroLayout(),
     }
   }
 
   const itens: ParsedItem[] = []
+  const startIdx = headerLineIdx >= 0 ? headerLineIdx + 1 : 0
 
-  for (let i = 1; i < lines.length; i++) {
-    const row = splitLine(lines[i])
-    if (row.length <= 1 && (!row[0] || row[0].trim() === '')) continue
+  for (let i = startIdx; i < lines.length; i++) {
+    const row = splitCsvLine(lines[i], delimiter)
+    if (row.length === 0 || (row.length === 1 && !row[0])) continue
 
-    const rawData = row[finalDataIdx]
-    const rawDesc = finalDescIdx !== -1 ? row[finalDescIdx] : 'Lançamento sem descrição'
-    const rawValor = row[finalValorIdx]
-    const rawTipo = finalTipoIdx !== -1 ? row[finalTipoIdx] : undefined
+    // Ignora linhas de totalização ou rodapés típicos
+    const rowStr = row.join(' ').toLowerCase()
+    if (
+      rowStr.includes('saldo final') ||
+      rowStr.includes('total consolidado') ||
+      rowStr.includes('total geral')
+    ) {
+      continue
+    }
 
-    const dataNorm = normalizarData(rawData)
-    const valorNorm = normalizarValor(rawValor, rawTipo)
-
-    if (dataNorm && valorNorm) {
-      itens.push({
-        data: dataNorm,
-        descricao: (rawDesc || 'Lançamento sem descrição').trim(),
-        valor: valorNorm.valor,
-        tipo: valorNorm.tipo,
-        rawRow: row,
-      })
+    const item = extrairItemDeLinha(row, mapeamento)
+    if (item) {
+      itens.push(item)
     }
   }
 
@@ -312,19 +649,19 @@ export function parseCSV(content: string): ParseResult {
     return {
       sucesso: false,
       itens: [],
-      erro: 'Nenhuma transação válida foi encontrada no CSV. Verifique o formato do arquivo.',
+      erro: 'Nenhuma transação válida foi encontrada no CSV. ' + gerarMensagemErroLayout(),
     }
   }
 
   return {
     sucesso: true,
     itens,
-    totalLinhasLidas: lines.length - 1,
+    totalLinhasLidas: lines.length - startIdx,
   }
 }
 
 /**
- * Parser de planilhas XLS/XLSX usando SheetJS
+ * Parser de planilhas XLS/XLSX usando SheetJS com suporte a linhas de cabeçalho extras e colunas flexíveis
  */
 export function parseXLSX(dataBuffer: ArrayBuffer | Uint8Array): ParseResult {
   try {
@@ -335,70 +672,108 @@ export function parseXLSX(dataBuffer: ArrayBuffer | Uint8Array): ParseResult {
     }
 
     const worksheet = workbook.Sheets[firstSheetName]
-    const jsonData = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
-      raw: false,
+    // Converte para matriz de linhas (AOA: Array of Arrays) para permitir detectar onde está o cabeçalho
+    const matrix = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
+      header: 1,
       defval: '',
+      raw: false,
     })
 
-    if (!jsonData || jsonData.length === 0) {
+    if (!matrix || matrix.length === 0) {
       return { sucesso: false, itens: [], erro: 'Nenhuma linha de dados encontrada na planilha.' }
     }
 
-    // Identifica chaves das colunas
-    const firstRow = jsonData[0]
-    const keys = Object.keys(firstRow)
-
-    const findKey = (candidates: string[]): string | undefined => {
-      return keys.find((k) => {
-        const norm = k
-          .toLowerCase()
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-        return candidates.some((c) => norm.includes(c))
-      })
+    // Procura a linha de cabeçalho
+    let headerLineIdx = -1
+    let mapeamento: ColunasMapeadas = {
+      dataIdx: -1,
+      descIdx: -1,
+      valorIdx: -1,
+      debitoIdx: -1,
+      creditoIdx: -1,
+      tipoIdx: -1,
     }
 
-    const dataKey = findKey(['data', 'date', 'dt', 'dia'])
-    const descKey = findKey([
-      'desc',
-      'historico',
-      'historico',
-      'detalhe',
-      'memo',
-      'estabelecimento',
-      'titulo',
-      'nome',
-    ])
-    const valorKey = findKey(['valor', 'amount', 'quantia', 'vlr'])
-    const tipoKey = findKey(['tipo', 'type', 'natureza', 'd/c', 'dc'])
+    for (let i = 0; i < Math.min(matrix.length, 15); i++) {
+      const row = matrix[i] as unknown[]
+      if (!Array.isArray(row)) continue
 
-    if (!dataKey || !valorKey) {
+      const stringRow = row.map((c) => String(c ?? ''))
+      const m = mapearColunas(stringRow)
+      const hasData = m.dataIdx !== -1
+      const hasValor = m.valorIdx !== -1 || m.debitoIdx !== -1 || m.creditoIdx !== -1
+
+      if (hasData && hasValor) {
+        headerLineIdx = i
+        mapeamento = m
+        break
+      }
+    }
+
+    // Fallback se não encontrou cabeçalho nomeado
+    if (headerLineIdx === -1) {
+      for (let i = 0; i < Math.min(matrix.length, 5); i++) {
+        const row = matrix[i] as unknown[]
+        if (!Array.isArray(row)) continue
+
+        let foundData = -1
+        let foundValor = -1
+        let foundDesc = -1
+
+        for (let c = 0; c < row.length; c++) {
+          if (foundData === -1 && normalizarData(row[c])) {
+            foundData = c
+          } else if (foundValor === -1 && normalizarValor(row[c])) {
+            foundValor = c
+          }
+        }
+
+        if (foundData !== -1 && foundValor !== -1) {
+          for (let c = 0; c < row.length; c++) {
+            if (c !== foundData && c !== foundValor && row[c] && isNaN(Number(row[c]))) {
+              foundDesc = c
+              break
+            }
+          }
+          headerLineIdx = i > 0 ? 0 : -1
+          mapeamento = {
+            dataIdx: foundData,
+            descIdx: foundDesc,
+            valorIdx: foundValor,
+            debitoIdx: -1,
+            creditoIdx: -1,
+            tipoIdx: -1,
+          }
+          break
+        }
+      }
+    }
+
+    const hasDataCol = mapeamento.dataIdx !== -1
+    const hasValorCol =
+      mapeamento.valorIdx !== -1 ||
+      (mapeamento.debitoIdx !== -1 && mapeamento.creditoIdx !== -1) ||
+      mapeamento.debitoIdx !== -1 ||
+      mapeamento.creditoIdx !== -1
+
+    if (!hasDataCol || !hasValorCol) {
       return {
         sucesso: false,
         itens: [],
-        erro: 'Não foi possível identificar colunas de Data e Valor na planilha. Verifique o cabeçalho.',
+        erro: gerarMensagemErroLayout(),
       }
     }
 
     const itens: ParsedItem[] = []
+    const startIdx = headerLineIdx >= 0 ? headerLineIdx + 1 : 0
 
-    for (const row of jsonData) {
-      const rawData = row[dataKey]
-      const rawDesc = descKey ? row[descKey] : 'Lançamento sem descrição'
-      const rawValor = row[valorKey]
-      const rawTipo = tipoKey ? String(row[tipoKey]) : undefined
+    for (let i = startIdx; i < matrix.length; i++) {
+      const row = matrix[i] as unknown[]
+      if (!Array.isArray(row) || row.length === 0) continue
 
-      const dataNorm = normalizarData(rawData)
-      const valorNorm = normalizarValor(rawValor, rawTipo)
-
-      if (dataNorm && valorNorm) {
-        itens.push({
-          data: dataNorm,
-          descricao: String(rawDesc || 'Lançamento sem descrição').trim(),
-          valor: valorNorm.valor,
-          tipo: valorNorm.tipo,
-          rawRow: row,
-        })
+      const item = extrairItemDeLinha(row, mapeamento)
+      if (item) {
+        itens.push(item)
       }
     }
 
@@ -406,20 +781,22 @@ export function parseXLSX(dataBuffer: ArrayBuffer | Uint8Array): ParseResult {
       return {
         sucesso: false,
         itens: [],
-        erro: 'Nenhuma transação válida encontrada nas linhas da planilha.',
+        erro:
+          'Nenhuma transação válida encontrada nas linhas da planilha. ' +
+          gerarMensagemErroLayout(),
       }
     }
 
     return {
       sucesso: true,
       itens,
-      totalLinhasLidas: jsonData.length,
+      totalLinhasLidas: matrix.length - startIdx,
     }
   } catch (err: unknown) {
     return {
       sucesso: false,
       itens: [],
-      erro: `Erro ao processar planilha: ${(err as Error).message || 'formato inválido'}`,
+      erro: `Erro ao processar planilha: ${(err as Error).message || 'formato inválido'}. ${gerarMensagemErroLayout()}`,
     }
   }
 }
@@ -467,7 +844,9 @@ export async function parsePDF(dataBuffer: ArrayBuffer | Uint8Array): Promise<Pa
       return {
         sucesso: false,
         itens: [],
-        erro: 'Não foi possível ler este PDF. Sugerimos exportar o extrato como CSV ou XLSX pelo app do seu banco.',
+        erro:
+          'Não foi possível ler este PDF. O documento parece estar vazio ou escaneado como imagem. ' +
+          'Sugerimos exportar o extrato como CSV ou XLSX pelo aplicativo ou Internet Banking do seu banco, ou lançar manualmente.',
       }
     }
 
@@ -502,7 +881,9 @@ export async function parsePDF(dataBuffer: ArrayBuffer | Uint8Array): Promise<Pa
       return {
         sucesso: false,
         itens: [],
-        erro: 'Não foi possível ler este PDF. Sugerimos exportar o extrato como CSV ou XLSX pelo app do seu banco.',
+        erro:
+          'Não foi possível identificar lançamentos estruturados neste PDF com precisão. ' +
+          'Para evitar dados inconsistentes, sugerimos exportar o extrato em formato XLSX ou CSV pelo app do seu banco, ou registrar manualmente.',
       }
     }
 
@@ -515,7 +896,9 @@ export async function parsePDF(dataBuffer: ArrayBuffer | Uint8Array): Promise<Pa
     return {
       sucesso: false,
       itens: [],
-      erro: 'Não foi possível ler este PDF. Sugerimos exportar o extrato como CSV ou XLSX pelo app do seu banco.',
+      erro:
+        `Não foi possível ler este arquivo PDF (${(err as Error).message || 'formato não suportado'}). ` +
+        'Sugerimos exportar o extrato como CSV ou XLSX pelo app do seu banco ou registrar os lançamentos manualmente.',
     }
   }
 }

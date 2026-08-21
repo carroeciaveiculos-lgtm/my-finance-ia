@@ -4,10 +4,10 @@ import { lancamentosService } from '@/services/lancamentos'
 import { categoriasService } from '@/services/categorias'
 import { documentosService } from '@/services/documentos'
 import { supabase } from '@/lib/supabase/client'
-import { parseCSV, parseXLSX, parsePDF } from '@/services/importacaoParser'
+import { parseCSV, parseXLSX, parsePDF, COLUNAS_ESPERADAS_AJUDA } from '@/services/importacaoParser'
 import { classificarEAutoCategorizar, type ItemPreviaImportacao } from '@/services/importacaoEngine'
-import type { Conta, Categoria, DocumentoImportado, TipoDocumento, TipoLancamento } from '@/types'
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
+import type { Conta, Categoria, DocumentoImportado, TipoDocumento } from '@/types'
+import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Botao } from '@/components/ui/botao'
 import { Modal } from '@/components/ui/modal'
 import { useToast } from '@/hooks/use-toast'
@@ -18,15 +18,15 @@ import {
   AlertTriangle,
   CheckCircle2,
   XCircle,
-  HelpCircle,
-  ArrowRight,
   Plus,
   RefreshCw,
   Clock,
-  Building2,
   Check,
   AlertCircle,
-  Info,
+  HelpCircle,
+  ChevronDown,
+  ChevronUp,
+  FileEdit,
 } from 'lucide-react'
 
 export const ImportacaoPage: React.FC = () => {
@@ -45,9 +45,9 @@ export const ImportacaoPage: React.FC = () => {
   const [salvandoNovaConta, setSalvandoNovaConta] = useState(false)
 
   // Estado do Arquivo / Upload / Parsing
-  const [arquivoSelecionado, setArquivoSelecionado] = useState<File | null>(null)
   const [processandoArquivo, setProcessandoArquivo] = useState(false)
   const [erroParsing, setErroParsing] = useState<string | null>(null)
+  const [mostrarGuiaAjuda, setMostrarGuiaAjuda] = useState(false)
 
   // Estado da Prévia
   const [etapaAtual, setEtapaAtual] = useState<'upload' | 'previa' | 'sucesso'>('upload')
@@ -68,36 +68,32 @@ export const ImportacaoPage: React.FC = () => {
         documentosService.listar(),
       ])
 
-      if (resContas.error) {
+      if (resContas && resContas.error) {
         console.warn('Aviso ao carregar contas:', resContas.error.message)
       }
-      if (resCats.error) {
+      if (resCats && resCats.error) {
         console.warn('Aviso ao carregar categorias:', resCats.error.message)
       }
-      if (resDocs.error) {
+      if (resDocs && resDocs.error) {
         console.warn('Aviso ao carregar documentos:', resDocs.error.message)
       }
 
-      if (resContas.data) {
-        setContas(resContas.data)
-        if (resContas.data.length > 0) {
-          setContaSelecionadaId((prev) => (prev ? prev : resContas.data![0].id))
-        }
-      } else {
-        setContas([])
+      const contasCarregadas = Array.isArray(resContas?.data) ? resContas.data : []
+      setContas(contasCarregadas)
+      if (contasCarregadas.length > 0) {
+        setContaSelecionadaId((prev) => {
+          if (prev && contasCarregadas.some((c) => c.id === prev)) {
+            return prev
+          }
+          return contasCarregadas[0].id
+        })
       }
 
-      if (resCats.data) {
-        setCategorias(resCats.data)
-      } else {
-        setCategorias([])
-      }
+      const categoriasCarregadas = Array.isArray(resCats?.data) ? resCats.data : []
+      setCategorias(categoriasCarregadas)
 
-      if (resDocs.data) {
-        setHistoricoDocumentos(resDocs.data)
-      } else {
-        setHistoricoDocumentos([])
-      }
+      const docsCarregados = Array.isArray(resDocs?.data) ? resDocs.data : []
+      setHistoricoDocumentos(docsCarregados)
     } catch (err: unknown) {
       console.error('Erro no carregamento inicial de importação:', err)
       toast({
@@ -105,6 +101,9 @@ export const ImportacaoPage: React.FC = () => {
         description: (err as Error).message || 'Tente recarregar a página.',
         variant: 'destructive',
       })
+      setContas([])
+      setCategorias([])
+      setHistoricoDocumentos([])
     } finally {
       setCarregando(false)
     }
@@ -182,7 +181,6 @@ export const ImportacaoPage: React.FC = () => {
       return
     }
 
-    setArquivoSelecionado(file)
     setProcessandoArquivo(true)
     setErroParsing(null)
 
@@ -205,8 +203,8 @@ export const ImportacaoPage: React.FC = () => {
       }
 
       // Se falhou no parse
-      if (!parseResult.sucesso || parseResult.itens.length === 0) {
-        // Registra documento no banco com status 'nao_importado' ou 'erro'
+      if (!parseResult.sucesso || !parseResult.itens || parseResult.itens.length === 0) {
+        // Registra documento no banco com status 'nao_importado' (garantia de rastreabilidade segura)
         await documentosService.registrar({
           nome_arquivo: file.name,
           tipo: tipoDoc,
@@ -217,7 +215,7 @@ export const ImportacaoPage: React.FC = () => {
 
         setErroParsing(
           parseResult.erro ||
-            'Não foi possível ler este arquivo. Sugerimos exportar o extrato como CSV ou XLSX pelo app do seu banco.',
+            'Não foi possível reconhecer o layout deste arquivo. Verifique se possui colunas com Data e Valor.',
         )
         setProcessandoArquivo(false)
         return
@@ -251,22 +249,26 @@ export const ImportacaoPage: React.FC = () => {
         caminho_storage: caminhoStorage,
       })
 
-      if (resDoc.data) {
+      if (resDoc && resDoc.data) {
         setDocumentoIdGerado(resDoc.data.id)
       }
 
       // Busca todos os lançamentos existentes do usuário para deduplicação e auto-categorização
       const resLancExistentes = await lancamentosService.listar()
-      const lancamentosExistentes = resLancExistentes.data || []
+      const lancamentosExistentes = Array.isArray(resLancExistentes?.data)
+        ? resLancExistentes.data
+        : []
 
       // Extrai todas as categorias planas (pais e filhas)
       const categoriasPlanas: Categoria[] = []
-      categorias.forEach((c) => {
-        categoriasPlanas.push(c)
-        if (c.subcategorias) {
-          c.subcategorias.forEach((s) => categoriasPlanas.push(s))
-        }
-      })
+      if (Array.isArray(categorias)) {
+        categorias.forEach((c) => {
+          categoriasPlanas.push(c)
+          if (c.subcategorias && Array.isArray(c.subcategorias)) {
+            c.subcategorias.forEach((s) => categoriasPlanas.push(s))
+          }
+        })
+      }
 
       // Classifica em 3 grupos + Auto-categorização estrita
       const itensClassificados = classificarEAutoCategorizar({
@@ -289,7 +291,6 @@ export const ImportacaoPage: React.FC = () => {
     setItensPrevia((prev) =>
       prev.map((item) => {
         if (item.idTemp !== idTemp) return item
-        // Busca subcategorias da nova categoria
         const cat = categorias.find((c) => c.id === novaCategoriaId)
         return {
           ...item,
@@ -389,7 +390,6 @@ export const ImportacaoPage: React.FC = () => {
 
   const reiniciarImportacao = () => {
     setEtapaAtual('upload')
-    setArquivoSelecionado(null)
     setItensPrevia([])
     setErroParsing(null)
     setDocumentoIdGerado(null)
@@ -405,8 +405,8 @@ export const ImportacaoPage: React.FC = () => {
             Importação Inteligente de Extratos
           </h1>
           <p className="text-sm text-texto-apoio mt-1">
-            Importe arquivos CSV, XLS, XLSX ou PDF com deduplicação rigorosa e auto-categorização
-            histórica.
+            Importe arquivos CSV, XLS, XLSX ou PDF com reconhecimento flexível de colunas,
+            deduplicação rigorosa e auto-categorização histórica.
           </p>
         </div>
 
@@ -463,22 +463,114 @@ export const ImportacaoPage: React.FC = () => {
             </div>
           </Card>
 
-          {/* Erro de Parsing / Mensagem de Orientação */}
+          {/* Erro de Parsing / Mensagem Rica e Orientativa */}
           {erroParsing && (
-            <div className="p-4 rounded-2xl bg-vermelho-suave/10 border border-vermelho-suave/30 text-texto-principal flex items-start gap-3 animate-fade-in">
-              <AlertCircle className="h-5 w-5 text-vermelho-suave shrink-0 mt-0.5" />
-              <div className="space-y-1 text-xs">
-                <strong className="text-vermelho-suave font-semibold block">
-                  Não foi possível processar este arquivo
-                </strong>
-                <p className="text-texto-apoio">{erroParsing}</p>
-                <p className="text-texto-apoio font-medium pt-1">
-                  💡 Dica do James: Arquivos CSV ou XLSX gerados diretamente pelo Internet Banking
-                  ou app do seu banco são 100% estruturados e garantem a melhor precisão.
-                </p>
+            <div className="p-5 rounded-2xl bg-vermelho-suave/10 border border-vermelho-suave/30 text-texto-principal space-y-3 animate-fade-in">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-vermelho-suave shrink-0 mt-0.5" />
+                <div className="space-y-1.5 text-xs flex-1">
+                  <strong className="text-vermelho-suave font-semibold text-sm block">
+                    Não foi possível processar este arquivo
+                  </strong>
+                  <p className="text-texto-principal leading-relaxed">{erroParsing}</p>
+                </div>
+              </div>
+
+              {/* Dicas e Alternativas Úteis */}
+              <div className="pt-2 border-t border-vermelho-suave/20 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="p-3 bg-white/70 rounded-xl border border-vermelho-suave/20 space-y-1">
+                  <span className="font-semibold text-verde-floresta flex items-center gap-1.5">
+                    <FileSpreadsheet className="h-4 w-4 text-verde-floresta" />
+                    Opção 1: Exportar em XLSX / CSV
+                  </span>
+                  <p className="text-texto-apoio text-[11px]">
+                    No app ou Internet Banking do seu banco, escolha exportar o extrato no formato{' '}
+                    <strong>XLSX</strong> ou <strong>CSV</strong>.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-white/70 rounded-xl border border-vermelho-suave/20 space-y-1">
+                  <span className="font-semibold text-verde-floresta flex items-center gap-1.5">
+                    <FileEdit className="h-4 w-4 text-verde-floresta" />
+                    Opção 2: Lançamento Manual
+                  </span>
+                  <p className="text-texto-apoio text-[11px]">
+                    Você também pode cadastrar seus lançamentos diretamente na aba{' '}
+                    <a href="/lancamentos" className="underline text-verde-floresta font-semibold">
+                      Lançamentos
+                    </a>
+                    .
+                  </p>
+                </div>
               </div>
             </div>
           )}
+
+          {/* Guia de Formatos Aceitos (Accordion Expansível) */}
+          <Card className="border-verde-menta/70 bg-verde-menta/10 overflow-hidden shadow-none">
+            <button
+              type="button"
+              onClick={() => setMostrarGuiaAjuda(!mostrarGuiaAjuda)}
+              className="w-full p-3.5 px-5 flex items-center justify-between text-left hover:bg-verde-menta/20 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <HelpCircle className="h-4 w-4 text-verde-floresta shrink-0" />
+                <span className="text-xs font-semibold text-verde-floresta">
+                  Quais colunas e formatos são aceitos? (Clique para ver detalhes)
+                </span>
+              </div>
+              {mostrarGuiaAjuda ? (
+                <ChevronUp className="h-4 w-4 text-verde-floresta" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-verde-floresta" />
+              )}
+            </button>
+
+            {mostrarGuiaAjuda && (
+              <div className="p-5 pt-1 border-t border-verde-menta/50 text-xs text-texto-principal space-y-3 bg-white/50 animate-fade-in">
+                <p className="text-texto-apoio text-[11px]">
+                  O parser do My Finance IA reconhece automaticamente cabeçalhos case-insensitive,
+                  linhas extras no topo de extratos bancários e múltiplos delimitadores (vírgula,
+                  ponto e vírgula, tabulação ou pipe).
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+                  <div className="p-3 bg-white rounded-xl border border-verde-menta/60">
+                    <span className="font-semibold text-verde-floresta block mb-1">
+                      📅 Coluna de Data
+                    </span>
+                    <ul className="text-[11px] text-texto-apoio space-y-0.5 list-disc pl-3">
+                      {COLUNAS_ESPERADAS_AJUDA.data.slice(0, 7).map((col) => (
+                        <li key={col}>{col}</li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="p-3 bg-white rounded-xl border border-verde-menta/60">
+                    <span className="font-semibold text-verde-floresta block mb-1">
+                      💰 Coluna de Valor
+                    </span>
+                    <ul className="text-[11px] text-texto-apoio space-y-0.5 list-disc pl-3">
+                      <li>Valor / Valor (R$) / Saldo</li>
+                      <li>Colunas separadas: Débito e Crédito</li>
+                      <li>Colunas separadas: Saída e Entrada</li>
+                    </ul>
+                  </div>
+
+                  <div className="p-3 bg-white rounded-xl border border-verde-menta/60">
+                    <span className="font-semibold text-verde-floresta block mb-1">
+                      📝 Coluna de Descrição
+                    </span>
+                    <ul className="text-[11px] text-texto-apoio space-y-0.5 list-disc pl-3">
+                      {COLUNAS_ESPERADAS_AJUDA.descricao.slice(0, 6).map((col) => (
+                        <li key={col}>{col}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+          </Card>
 
           {/* Dropzone de Upload */}
           <Card
@@ -516,7 +608,10 @@ export const ImportacaoPage: React.FC = () => {
                 </p>
               </div>
 
-              <div className="flex items-center justify-center gap-2 pt-2">
+              <div className="flex items-center justify-center gap-2 pt-2 flex-wrap">
+                <span className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-creme text-texto-apoio border border-verde-menta">
+                  Reconhecimento Flexível
+                </span>
                 <span className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-creme text-texto-apoio border border-verde-menta">
                   Deduplicação 100%
                 </span>
@@ -542,8 +637,13 @@ export const ImportacaoPage: React.FC = () => {
                     Registro de arquivos enviados e status de processamento.
                   </CardDescription>
                 </div>
-                <Botao variant="ghost" size="sm" onClick={carregarDadosIniciais}>
-                  <RefreshCw className="h-3.5 w-3.5" />
+                <Botao
+                  variant="ghost"
+                  size="sm"
+                  onClick={carregarDadosIniciais}
+                  disabled={carregando}
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${carregando ? 'animate-spin' : ''}`} />
                 </Botao>
               </div>
             </CardHeader>
@@ -571,7 +671,7 @@ export const ImportacaoPage: React.FC = () => {
                           const dt = new Date(doc.created_at)
                           dataFormatada = !isNaN(dt.getTime())
                             ? dt.toLocaleString('pt-BR')
-                            : doc.created_at
+                            : String(doc.created_at)
                         }
                       } catch {
                         dataFormatada = '—'
@@ -609,7 +709,7 @@ export const ImportacaoPage: React.FC = () => {
                               {doc.status === 'processado' && <Clock className="h-3 w-3" />}
                               {doc.status === 'nao_importado' && <XCircle className="h-3 w-3" />}
                               {doc.status === 'erro' && <AlertTriangle className="h-3 w-3" />}
-                              {doc.status}
+                              {doc.status === 'nao_importado' ? 'não importado' : doc.status}
                             </span>
                           </td>
                         </tr>

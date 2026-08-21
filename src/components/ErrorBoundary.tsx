@@ -66,6 +66,16 @@ export class ErrorBoundary extends Component<Props, State> {
                   <RefreshCw className="h-4 w-4" />
                   <span>Tentar novamente</span>
                 </Botao>
+                <Botao
+                  variant="secondary"
+                  onClick={() => {
+                    this.setState({ hasError: false, error: null })
+                    window.location.reload()
+                  }}
+                  className="gap-2 shadow-sm"
+                >
+                  <span>Recarregar página</span>
+                </Botao>
               </div>
             </CardContent>
           </Card>
