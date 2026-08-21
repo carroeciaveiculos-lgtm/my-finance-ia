@@ -23,16 +23,32 @@ import {
   User as UserIcon,
 } from 'lucide-react'
 
+interface SubNavItem {
+  rotulo: string
+  rota: string
+}
+
 interface NavItem {
   rotulo: string
   rota: string
   icone: React.ElementType
   emBreve?: boolean
+  subitens?: SubNavItem[]
 }
 
 const ITENS_MENU: NavItem[] = [
   { rotulo: 'Dashboard', rota: '/dashboard', icone: LayoutDashboard },
-  { rotulo: 'Contas & Carteiras', rota: '/contas', icone: Wallet },
+  {
+    rotulo: 'Contas & Carteiras',
+    rota: '/contas',
+    icone: Wallet,
+    subitens: [
+      { rotulo: 'Contas', rota: '/contas' },
+      { rotulo: 'Categorias', rota: '/categorias' },
+      { rotulo: 'Status', rota: '/status' },
+      { rotulo: 'Grupos', rota: '/grupos' },
+    ],
+  },
   { rotulo: 'Lançamentos', rota: '/lancamentos', icone: ArrowLeftRight },
   { rotulo: 'Importação de Extratos', rota: '/importacao', icone: FileSpreadsheet },
   { rotulo: 'Metas', rota: '/metas', icone: Target },
@@ -152,34 +168,62 @@ export const AppLayout: React.FC = () => {
             </p>
             {ITENS_MENU.map((item) => {
               const Icone = item.icone
-              const isAtivo = location.pathname === item.rota
+              const isItemAtivo =
+                location.pathname === item.rota ||
+                (item.subitens && item.subitens.some((sub) => location.pathname === sub.rota))
 
               return (
-                <NavLink
-                  key={item.rota}
-                  to={item.rota}
-                  className={({ isActive }) =>
-                    `flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 ${
-                      isActive
-                        ? 'bg-verde-floresta text-white shadow-sm font-semibold'
-                        : 'text-texto-principal hover:bg-verde-menta hover:text-verde-floresta'
-                    }`
-                  }
-                >
-                  <div className="flex items-center gap-3">
-                    <Icone className={`h-4 w-4 ${isAtivo ? 'text-white' : 'text-texto-apoio'}`} />
-                    <span>{item.rotulo}</span>
-                  </div>
-                  {item.emBreve && (
-                    <span
-                      className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
-                        isAtivo ? 'bg-white/20 text-white' : 'bg-verde-menta text-texto-apoio'
-                      }`}
-                    >
-                      Em breve
-                    </span>
+                <div key={item.rota} className="space-y-0.5">
+                  <NavLink
+                    to={item.rota}
+                    className={() =>
+                      `flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 ${
+                        isItemAtivo
+                          ? 'bg-verde-floresta text-white shadow-sm font-semibold'
+                          : 'text-texto-principal hover:bg-verde-menta hover:text-verde-floresta'
+                      }`
+                    }
+                  >
+                    <div className="flex items-center gap-3">
+                      <Icone
+                        className={`h-4 w-4 ${isItemAtivo ? 'text-white' : 'text-texto-apoio'}`}
+                      />
+                      <span>{item.rotulo}</span>
+                    </div>
+                    {item.emBreve && (
+                      <span
+                        className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                          isItemAtivo ? 'bg-white/20 text-white' : 'bg-verde-menta text-texto-apoio'
+                        }`}
+                      >
+                        Em breve
+                      </span>
+                    )}
+                  </NavLink>
+
+                  {/* Subitens aninhados se o grupo estiver ativo */}
+                  {item.subitens && isItemAtivo && (
+                    <div className="pl-6 pr-2 py-1 space-y-1">
+                      {item.subitens.map((sub) => {
+                        const isSubAtivo = location.pathname === sub.rota
+                        return (
+                          <NavLink
+                            key={sub.rota}
+                            to={sub.rota}
+                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                              isSubAtivo
+                                ? 'bg-verde-menta text-verde-floresta font-bold shadow-2xs'
+                                : 'text-texto-apoio hover:text-texto-principal hover:bg-creme'
+                            }`}
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full bg-verde-floresta/60" />
+                            <span>{sub.rotulo}</span>
+                          </NavLink>
+                        )
+                      })}
+                    </div>
                   )}
-                </NavLink>
+                </div>
               )
             })}
           </nav>
@@ -245,29 +289,56 @@ export const AppLayout: React.FC = () => {
 
             {ITENS_MENU.map((item) => {
               const Icone = item.icone
+              const isItemAtivo =
+                location.pathname === item.rota ||
+                (item.subitens && item.subitens.some((sub) => location.pathname === sub.rota))
+
               return (
-                <NavLink
-                  key={item.rota}
-                  to={item.rota}
-                  onClick={() => setMenuMobileAberto(false)}
-                  className={({ isActive }) =>
-                    `flex items-center justify-between px-3.5 py-3 rounded-xl text-sm font-medium ${
-                      isActive
-                        ? 'bg-verde-floresta text-white font-semibold'
-                        : 'text-texto-principal hover:bg-verde-menta'
-                    }`
-                  }
-                >
-                  <div className="flex items-center gap-3">
-                    <Icone className="h-4 w-4" />
-                    <span>{item.rotulo}</span>
-                  </div>
-                  {item.emBreve && (
-                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-verde-menta text-texto-apoio">
-                      Em breve
-                    </span>
+                <div key={item.rota} className="space-y-1">
+                  <NavLink
+                    to={item.rota}
+                    onClick={() => setMenuMobileAberto(false)}
+                    className={() =>
+                      `flex items-center justify-between px-3.5 py-3 rounded-xl text-sm font-medium ${
+                        isItemAtivo
+                          ? 'bg-verde-floresta text-white font-semibold'
+                          : 'text-texto-principal hover:bg-verde-menta'
+                      }`
+                    }
+                  >
+                    <div className="flex items-center gap-3">
+                      <Icone className="h-4 w-4" />
+                      <span>{item.rotulo}</span>
+                    </div>
+                    {item.emBreve && (
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-verde-menta text-texto-apoio">
+                        Em breve
+                      </span>
+                    )}
+                  </NavLink>
+
+                  {item.subitens && (
+                    <div className="grid grid-cols-2 gap-1.5 pl-6 pr-2 py-1">
+                      {item.subitens.map((sub) => {
+                        const isSubAtivo = location.pathname === sub.rota
+                        return (
+                          <NavLink
+                            key={sub.rota}
+                            to={sub.rota}
+                            onClick={() => setMenuMobileAberto(false)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium text-center ${
+                              isSubAtivo
+                                ? 'bg-verde-menta text-verde-floresta font-bold'
+                                : 'bg-creme/60 text-texto-apoio hover:text-texto-principal'
+                            }`}
+                          >
+                            {sub.rotulo}
+                          </NavLink>
+                        )
+                      })}
+                    </div>
                   )}
-                </NavLink>
+                </div>
               )
             })}
           </div>

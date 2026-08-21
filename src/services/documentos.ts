@@ -86,13 +86,63 @@ export const documentosService = {
     }
   },
 
-  async excluir(id: string): Promise<{ error: Error | null }> {
+  /**
+   * Conta quantos lançamentos estão vinculados a este documento
+   */
+  async contarLancamentos(id: string): Promise<number> {
     try {
+      const { count, error } = await rawClient
+        .from('lancamentos')
+        .select('*', { count: 'exact', head: true })
+        .eq('documento_id', id)
+
+      if (error) throw error
+      return count || 0
+    } catch {
+      return 0
+    }
+  },
+
+  /**
+   * Opção 1: Excluir apenas o registro do documento do histórico.
+   * Os lançamentos existentes no banco são mantidos (documento_id fica NULL pelo ON DELETE SET NULL).
+   */
+  async excluirApenasRegistro(id: string): Promise<{ error: Error | null }> {
+    try {
+      // 1. Opcional: Garante explicitamente que documento_id seja setado para NULL caso necessário
+      await rawClient.from('lancamentos').update({ documento_id: null }).eq('documento_id', id)
+
+      // 2. Remove o documento
       const { error } = await rawClient.from('documentos_importados').delete().eq('id', id)
       if (error) throw error
       return { error: null }
     } catch (err: unknown) {
       return { error: err as Error }
     }
+  },
+
+  /**
+   * Opção 2: Excluir documento E todos os lançamentos vinculados (WHERE documento_id = X)
+   */
+  async excluirDocumentoELancamentos(id: string): Promise<{ error: Error | null }> {
+    try {
+      // 1. Remove primeiro todos os lançamentos vinculados a este documento
+      const { error: errLanc } = await rawClient.from('lancamentos').delete().eq('documento_id', id)
+
+      if (errLanc) throw errLanc
+
+      // 2. Remove o documento importado
+      const { error: errDoc } = await rawClient.from('documentos_importados').delete().eq('id', id)
+
+      if (errDoc) throw errDoc
+
+      return { error: null }
+    } catch (err: unknown) {
+      return { error: err as Error }
+    }
+  },
+
+  async excluir(id: string): Promise<{ error: Error | null }> {
+    return this.excluirApenasRegistro(id)
   },
 }

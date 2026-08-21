@@ -92,6 +92,25 @@ export const categoriasService = {
     }
   },
 
+  async contarLancamentosUsando(id: string): Promise<number> {
+    try {
+      const { count: countCat, error: err1 } = await rawClient
+        .from('lancamentos')
+        .select('*', { count: 'exact', head: true })
+        .eq('categoria_id', id)
+
+      const { count: countSub, error: err2 } = await rawClient
+        .from('lancamentos')
+        .select('*', { count: 'exact', head: true })
+        .eq('subcategoria_id', id)
+
+      if (err1 && err2) throw err1
+      return (countCat || 0) + (countSub || 0)
+    } catch {
+      return 0
+    }
+  },
+
   async excluir(id: string): Promise<{ error: Error | null }> {
     try {
       const { error } = await rawClient.from('categorias').delete().eq('id', id)

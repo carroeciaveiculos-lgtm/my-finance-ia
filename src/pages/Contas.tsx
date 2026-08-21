@@ -1,12 +1,18 @@
 import React, { useState, useEffect, useId } from 'react'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { contasService } from '@/services/contas'
 import { lancamentosService } from '@/services/lancamentos'
-import type { Conta, TipoConta } from '@/types'
+import { statusService } from '@/services/status'
+import { gruposService } from '@/services/grupos'
+import type { Conta, TipoConta, ContaStatus, ContaGrupo } from '@/types'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Botao } from '@/components/ui/botao'
 import { Modal } from '@/components/ui/modal'
 import { AutocompleteBanco } from '@/components/AutocompleteBanco'
 import { useToast } from '@/hooks/use-toast'
+import { CategoriasSection } from '@/pages/Categorias'
+import { StatusSection } from '@/pages/Status'
+import { GruposSection } from '@/pages/Grupos'
 import {
   Wallet,
   Plus,
@@ -17,10 +23,12 @@ import {
   CreditCard,
   Banknote,
   MoreHorizontal,
-  ArrowUpDown,
   DollarSign,
   AlertCircle,
   RefreshCw,
+  FolderTree,
+  Tag,
+  Layers,
 } from 'lucide-react'
 
 const TIPOS_CONTA: { valor: TipoConta; rotulo: string; icone: React.ElementType }[] = [
@@ -31,9 +39,41 @@ const TIPOS_CONTA: { valor: TipoConta; rotulo: string; icone: React.ElementType 
   { valor: 'outro', rotulo: 'Outra / Investimento', icone: MoreHorizontal },
 ]
 
-export const ContasPage: React.FC = () => {
+export const ContasPage: React.FC<{
+  abaInicial?: 'contas' | 'categorias' | 'status' | 'grupos'
+}> = ({ abaInicial }) => {
   const { toast } = useToast()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
+
+  // Aba ativa: contas | categorias | status | grupos
+  const abaAtivaQuery =
+    (searchParams.get('aba') as 'contas' | 'categorias' | 'status' | 'grupos') ||
+    abaInicial ||
+    'contas'
+  const [abaAtiva, setAbaAtiva] = useState<'contas' | 'categorias' | 'status' | 'grupos'>(
+    abaAtivaQuery,
+  )
+
+  useEffect(() => {
+    if (abaInicial) {
+      setAbaAtiva(abaInicial)
+    } else if (searchParams.get('aba')) {
+      const q = searchParams.get('aba') as 'contas' | 'categorias' | 'status' | 'grupos'
+      if (['contas', 'categorias', 'status', 'grupos'].includes(q)) {
+        setAbaAtiva(q)
+      }
+    }
+  }, [searchParams, abaInicial])
+
+  const mudarAba = (novaAba: 'contas' | 'categorias' | 'status' | 'grupos') => {
+    setAbaAtiva(novaAba)
+    setSearchParams({ aba: novaAba })
+  }
+
   const [contas, setContas] = useState<Conta[]>([])
+  const [listaStatus, setListaStatus] = useState<ContaStatus[]>([])
+  const [listaGrupos, setListaGrupos] = useState<ContaGrupo[]>([])
   const [carregando, setCarregando] = useState(true)
   const [modalCriarEditarAberto, setModalCriarEditarAberto] = useState(false)
   const [modalExcluirAberto, setModalExcluirAberto] = useState(false)
@@ -50,6 +90,8 @@ export const ContasPage: React.FC = () => {
   const [tipo, setTipo] = useState<TipoConta>('conta_corrente')
   const [banco, setBanco] = useState('')
   const [saldoInicial, setSaldoInicial] = useState('0,00')
+  const [statusId, setStatusId] = useState<string>('')
+  const [grupoId, setGrupoId] = useState<string>('')
   const [numeroBanco, setNumeroBanco] = useState('')
   const [agencia, setAgencia] = useState('')
   const [agenciaDigito, setAgenciaDigito] = useState('')
@@ -65,6 +107,8 @@ export const ContasPage: React.FC = () => {
   const tipoId = useId()
   const bancoId = useId()
   const saldoInicialId = useId()
+  const statusSelectId = useId()
+  const grupoSelectId = useId()
   const numeroBancoId = useId()
   const agenciaId = useId()
   const agenciaDigitoId = useId()
@@ -77,10 +121,15 @@ export const ContasPage: React.FC = () => {
 
   const carregarDados = async () => {
     setCarregando(true)
-    const [resContas, resLancamentos] = await Promise.all([
+    const [resContas, resLancamentos, resStatus, resGrupos] = await Promise.all([
       contasService.listar(),
       lancamentosService.listar(),
+      statusService.listar(),
+      gruposService.listar(),
     ])
+
+    if (resStatus.data) setListaStatus(resStatus.data)
+    if (resGrupos.data) setListaGrupos(resGrupos.data)
 
     if (resContas.error) {
       toast({
@@ -137,6 +186,10 @@ export const ContasPage: React.FC = () => {
     setTipo('conta_corrente')
     setBanco('')
     setSaldoInicial('0,00')
+    // Default status "Ativa" se existir
+    const statusAtiva = listaStatus.find((s) => s.nome.toLowerCase() === 'ativa')
+    setStatusId(statusAtiva ? statusAtiva.id : listaStatus[0]?.id || '')
+    setGrupoId('')
     setNumeroBanco('')
     setAgencia('')
     setAgenciaDigito('')
@@ -161,6 +214,8 @@ export const ContasPage: React.FC = () => {
         maximumFractionDigits: 2,
       }),
     )
+    setStatusId(c.status_id || '')
+    setGrupoId(c.grupo_id || '')
     setNumeroBanco(c.numero_banco || '')
     setAgencia(c.agencia || '')
     setAgenciaDigito(c.agencia_digito || '')
@@ -237,6 +292,8 @@ export const ContasPage: React.FC = () => {
         tipo,
         banco: banco.trim() || null,
         saldo_inicial: saldoNum,
+        status_id: statusId || null,
+        grupo_id: grupoId || null,
         ...dadosEspecificos,
       })
       if (error) {
@@ -252,6 +309,8 @@ export const ContasPage: React.FC = () => {
         tipo,
         banco: banco.trim() || null,
         saldo_inicial: saldoNum,
+        status_id: statusId || null,
+        grupo_id: grupoId || null,
         ...dadosEspecificos,
       })
       if (error) {
@@ -294,238 +353,341 @@ export const ContasPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="font-display font-bold text-2xl sm:text-3xl text-verde-floresta tracking-tight">
-            Gestão de Contas & Carteiras
+            Contas & Carteiras
           </h1>
           <p className="text-sm text-texto-apoio mt-1">
-            Cadastre suas contas bancárias, cartões, carteiras físicas e acompanhe seus saldos
-            consolidados.
+            Gerencie suas contas, categorias, status operacionais e grupos organizacionais em um
+            único lugar.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Botao variant="menta" size="sm" onClick={carregarDados} disabled={carregando}>
-            <RefreshCw className={`h-4 w-4 ${carregando ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">Atualizar</span>
-          </Botao>
-          <Botao onClick={abrirModalNovo} className="gap-2 shadow-sm">
-            <Plus className="h-4 w-4" />
-            <span>Nova Conta</span>
-          </Botao>
-        </div>
-      </div>
-
-      {/* Card Resumo de Saldo Consolidado */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="border-verde-menta bg-gradient-to-br from-white to-verde-menta/30 shadow-sm md:col-span-1">
-          <CardHeader className="pb-2">
-            <CardDescription className="text-texto-apoio flex items-center justify-between text-xs font-semibold uppercase tracking-wider">
-              <span>Saldo Total Consolidado</span>
-              <DollarSign className="h-4 w-4 text-verde-floresta" />
-            </CardDescription>
-            <CardTitle className="font-display text-2xl sm:text-3xl font-bold tabular-nums text-verde-floresta">
-              {saldoGeralConsolidado.toLocaleString('pt-BR', {
-                style: 'currency',
-                currency: 'BRL',
-              })}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0 text-xs text-texto-apoio">
-            Soma de {contas.length}{' '}
-            {contas.length === 1 ? 'conta cadastrada' : 'contas cadastradas'}
-          </CardContent>
-        </Card>
-
-        <Card className="border-verde-menta bg-white shadow-sm md:col-span-2 flex flex-col justify-center">
-          <CardContent className="py-4 flex items-center gap-4">
-            <div className="h-12 w-12 rounded-2xl bg-verde-menta flex items-center justify-center text-verde-floresta shrink-0">
-              <Wallet className="h-6 w-6" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-verde-floresta">
-                Organização por Carteiras
-              </h2>
-              <p className="text-xs text-texto-apoio mt-0.5">
-                Mantenha suas contas atualizadas para ter uma visão precisa do fluxo de caixa e
-                facilitar a conciliação de extratos.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Grid de Cards de Contas */}
-      {carregando ? (
-        <div className="py-16 text-center text-texto-apoio space-y-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-verde-floresta border-t-transparent mx-auto" />
-          <p className="text-sm">Carregando suas contas...</p>
-        </div>
-      ) : contas.length === 0 ? (
-        <Card className="border-dashed border-2 border-verde-menta bg-white p-12 text-center">
-          <div className="max-w-md mx-auto space-y-4">
-            <div className="h-14 w-14 rounded-2xl bg-verde-menta text-verde-floresta flex items-center justify-center mx-auto shadow-sm">
-              <Wallet className="h-7 w-7" />
-            </div>
-            <div className="space-y-1">
-              <h2 className="font-display font-bold text-lg text-verde-floresta">
-                Nenhuma conta cadastrada ainda
-              </h2>
-              <p className="text-xs text-texto-apoio leading-relaxed">
-                Comece criando sua primeira conta corrente, carteira ou cartão para registrar seus
-                lançamentos e importar extratos bancários.
-              </p>
-            </div>
-            <Botao onClick={abrirModalNovo} className="mx-auto">
+        {abaAtiva === 'contas' && (
+          <div className="flex items-center gap-2">
+            <Botao variant="menta" size="sm" onClick={carregarDados} disabled={carregando}>
+              <RefreshCw className={`h-4 w-4 ${carregando ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">Atualizar</span>
+            </Botao>
+            <Botao onClick={abrirModalNovo} className="gap-2 shadow-sm">
               <Plus className="h-4 w-4" />
-              <span>Cadastrar Minha Primeira Conta</span>
+              <span>Nova Conta</span>
             </Botao>
           </div>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {contas.map((conta) => {
-            const configTipo = TIPOS_CONTA.find((t) => t.valor === conta.tipo) || TIPOS_CONTA[0]
-            const IconeTipo = configTipo.icone
-            const saldoAtual = saldosAtuais[conta.id] ?? Number(conta.saldo_inicial)
+        )}
+      </div>
 
-            return (
-              <Card
-                key={conta.id}
-                className="border-verde-menta bg-white hover:border-verde-sage/60 transition-all duration-200 shadow-sm flex flex-col justify-between overflow-hidden group"
-              >
-                <div className="p-5 space-y-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="h-10 w-10 rounded-xl bg-verde-menta text-verde-floresta flex items-center justify-center shrink-0 shadow-sm">
-                        <IconeTipo className="h-5 w-5" />
+      {/* TABS NO TOPO: Contas | Categorias | Status | Grupos */}
+      <div className="flex items-center gap-2 border-b border-verde-menta pb-2 overflow-x-auto">
+        <button
+          type="button"
+          onClick={() => mudarAba('contas')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap ${
+            abaAtiva === 'contas'
+              ? 'bg-verde-floresta text-white shadow-sm'
+              : 'bg-white text-texto-principal hover:bg-verde-menta border border-verde-menta/60'
+          }`}
+        >
+          <Wallet className="h-4 w-4" />
+          <span>Contas ({contas.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => mudarAba('categorias')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap ${
+            abaAtiva === 'categorias'
+              ? 'bg-verde-floresta text-white shadow-sm'
+              : 'bg-white text-texto-principal hover:bg-verde-menta border border-verde-menta/60'
+          }`}
+        >
+          <FolderTree className="h-4 w-4" />
+          <span>Categorias & Subcategorias</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => mudarAba('status')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap ${
+            abaAtiva === 'status'
+              ? 'bg-verde-floresta text-white shadow-sm'
+              : 'bg-white text-texto-principal hover:bg-verde-menta border border-verde-menta/60'
+          }`}
+        >
+          <Tag className="h-4 w-4" />
+          <span>Status ({listaStatus.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => mudarAba('grupos')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap ${
+            abaAtiva === 'grupos'
+              ? 'bg-verde-floresta text-white shadow-sm'
+              : 'bg-white text-texto-principal hover:bg-verde-menta border border-verde-menta/60'
+          }`}
+        >
+          <Layers className="h-4 w-4" />
+          <span>Grupos ({listaGrupos.length})</span>
+        </button>
+      </div>
+
+      {/* RENDERIZAÇÃO CONFORME ABA ATIVA */}
+      {abaAtiva === 'categorias' && <CategoriasSection />}
+      {abaAtiva === 'status' && <StatusSection />}
+      {abaAtiva === 'grupos' && <GruposSection />}
+
+      {abaAtiva === 'contas' && (
+        <div className="space-y-6">
+          {/* Card Resumo de Saldo Consolidado */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card className="border-verde-menta bg-gradient-to-br from-white to-verde-menta/30 shadow-sm md:col-span-1">
+              <CardHeader className="pb-2">
+                <CardDescription className="text-texto-apoio flex items-center justify-between text-xs font-semibold uppercase tracking-wider">
+                  <span>Saldo Total Consolidado</span>
+                  <DollarSign className="h-4 w-4 text-verde-floresta" />
+                </CardDescription>
+                <CardTitle className="font-display text-2xl sm:text-3xl font-bold tabular-nums text-verde-floresta">
+                  {saldoGeralConsolidado.toLocaleString('pt-BR', {
+                    style: 'currency',
+                    currency: 'BRL',
+                  })}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0 text-xs text-texto-apoio">
+                Soma de {contas.length}{' '}
+                {contas.length === 1 ? 'conta cadastrada' : 'contas cadastradas'}
+              </CardContent>
+            </Card>
+
+            <Card className="border-verde-menta bg-white shadow-sm md:col-span-2 flex flex-col justify-center">
+              <CardContent className="py-4 flex items-center gap-4">
+                <div className="h-12 w-12 rounded-2xl bg-verde-menta flex items-center justify-center text-verde-floresta shrink-0">
+                  <Wallet className="h-6 w-6" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-semibold text-verde-floresta">
+                    Organização por Carteiras
+                  </h2>
+                  <p className="text-xs text-texto-apoio mt-0.5">
+                    Mantenha suas contas atualizadas para ter uma visão precisa do fluxo de caixa e
+                    facilitar a conciliação de extratos.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Grid de Cards de Contas */}
+          {carregando ? (
+            <div className="py-16 text-center text-texto-apoio space-y-3">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-verde-floresta border-t-transparent mx-auto" />
+              <p className="text-sm">Carregando suas contas...</p>
+            </div>
+          ) : contas.length === 0 ? (
+            <Card className="border-dashed border-2 border-verde-menta bg-white p-12 text-center">
+              <div className="max-w-md mx-auto space-y-4">
+                <div className="h-14 w-14 rounded-2xl bg-verde-menta text-verde-floresta flex items-center justify-center mx-auto shadow-sm">
+                  <Wallet className="h-7 w-7" />
+                </div>
+                <div className="space-y-1">
+                  <h2 className="font-display font-bold text-lg text-verde-floresta">
+                    Nenhuma conta cadastrada ainda
+                  </h2>
+                  <p className="text-xs text-texto-apoio leading-relaxed">
+                    Comece criando sua primeira conta corrente, carteira ou cartão para registrar
+                    seus lançamentos e importar extratos bancários.
+                  </p>
+                </div>
+                <Botao onClick={abrirModalNovo} className="mx-auto">
+                  <Plus className="h-4 w-4" />
+                  <span>Cadastrar Minha Primeira Conta</span>
+                </Botao>
+              </div>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {contas.map((conta) => {
+                const configTipo = TIPOS_CONTA.find((t) => t.valor === conta.tipo) || TIPOS_CONTA[0]
+                const IconeTipo = configTipo.icone
+                const saldoAtual = saldosAtuais[conta.id] ?? Number(conta.saldo_inicial)
+
+                return (
+                  <Card
+                    key={conta.id}
+                    className="border-verde-menta bg-white hover:border-verde-sage/60 transition-all duration-200 shadow-sm flex flex-col justify-between overflow-hidden group"
+                  >
+                    <div className="p-5 space-y-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="h-10 w-10 rounded-xl bg-verde-menta text-verde-floresta flex items-center justify-center shrink-0 shadow-sm">
+                            <IconeTipo className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h2 className="font-display font-semibold text-base text-texto-principal truncate">
+                                {conta.nome}
+                              </h2>
+
+                              {/* Badge de Status */}
+                              {conta.status && (
+                                <span
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold text-white shadow-2xs"
+                                  style={{ backgroundColor: conta.status.cor || '#6B7280' }}
+                                >
+                                  <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                                  {conta.status.nome}
+                                </span>
+                              )}
+
+                              {/* Badge de Grupo */}
+                              {conta.grupo && (
+                                <span
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border"
+                                  style={{
+                                    color: conta.grupo.cor || '#3B82F6',
+                                    borderColor: `${conta.grupo.cor || '#3B82F6'}40`,
+                                    backgroundColor: `${conta.grupo.cor || '#3B82F6'}15`,
+                                  }}
+                                >
+                                  {conta.grupo.nome}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1.5 text-xs text-texto-apoio truncate mt-0.5">
+                              <span>{configTipo.rotulo}</span>
+                              {conta.banco && (
+                                <>
+                                  <span>•</span>
+                                  <span className="font-medium text-verde-floresta truncate">
+                                    {conta.banco}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1 opacity-90 group-hover:opacity-100">
+                          <button
+                            onClick={() => abrirModalEditar(conta)}
+                            className="p-1.5 rounded-lg text-texto-apoio hover:bg-verde-menta hover:text-verde-floresta transition-colors"
+                            title="Editar conta"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setContaParaExcluir(conta)
+                              setModalExcluirAberto(true)
+                            }}
+                            className="p-1.5 rounded-lg text-texto-apoio hover:bg-vermelho-suave/10 hover:text-vermelho-suave transition-colors"
+                            title="Excluir conta"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <h2 className="font-display font-semibold text-base text-texto-principal truncate">
-                          {conta.nome}
-                        </h2>
-                        <div className="flex items-center gap-1.5 text-xs text-texto-apoio truncate">
-                          <span>{configTipo.rotulo}</span>
-                          {conta.banco && (
-                            <>
-                              <span>•</span>
-                              <span className="font-medium text-verde-floresta truncate">
-                                {conta.banco}
-                              </span>
-                            </>
-                          )}
+
+                      {/* Detalhes de Identificação da Conta / Cartão */}
+                      {(conta.tipo === 'conta_corrente' || conta.tipo === 'poupanca') &&
+                        (conta.agencia || conta.conta || conta.numero_banco) && (
+                          <div className="text-[11px] text-texto-apoio bg-verde-menta/20 rounded-lg p-2 space-y-0.5">
+                            {conta.numero_banco && (
+                              <div>
+                                <span className="font-semibold text-texto-principal">
+                                  Cód. Banco:
+                                </span>{' '}
+                                {conta.numero_banco}
+                              </div>
+                            )}
+                            {(conta.agencia || conta.agencia_digito) && (
+                              <div>
+                                <span className="font-semibold text-texto-principal">Agência:</span>{' '}
+                                {conta.agencia}
+                                {conta.agencia_digito ? `-${conta.agencia_digito}` : ''}
+                              </div>
+                            )}
+                            {(conta.conta || conta.conta_digito) && (
+                              <div>
+                                <span className="font-semibold text-texto-principal">Conta:</span>{' '}
+                                {conta.conta}
+                                {conta.conta_digito ? `-${conta.conta_digito}` : ''}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                      {conta.tipo === 'cartao_credito' &&
+                        (conta.bandeira || conta.numero_cartao_final || conta.validade) && (
+                          <div className="text-[11px] text-texto-apoio bg-verde-menta/20 rounded-lg p-2 space-y-0.5">
+                            {conta.bandeira && (
+                              <div>
+                                <span className="font-semibold text-texto-principal">
+                                  Bandeira:
+                                </span>{' '}
+                                {conta.bandeira}
+                              </div>
+                            )}
+                            {conta.numero_cartao_final && (
+                              <div>
+                                <span className="font-semibold text-texto-principal">
+                                  Cartão final:
+                                </span>{' '}
+                                •••• {conta.numero_cartao_final}
+                              </div>
+                            )}
+                            {conta.validade && (
+                              <div>
+                                <span className="font-semibold text-texto-principal">
+                                  Validade:
+                                </span>{' '}
+                                {conta.validade}
+                              </div>
+                            )}
+                            {conta.nome_impresso && (
+                              <div>
+                                <span className="font-semibold text-texto-principal">Titular:</span>{' '}
+                                {conta.nome_impresso}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                      <div className="pt-2 border-t border-verde-menta/60 flex items-end justify-between">
+                        <div>
+                          <span className="block text-[11px] font-medium text-texto-apoio">
+                            Saldo Atual
+                          </span>
+                          <span
+                            className={`font-display text-xl font-bold tabular-nums ${
+                              saldoAtual >= 0 ? 'text-verde-sucesso' : 'text-vermelho-suave'
+                            }`}
+                          >
+                            {saldoAtual.toLocaleString('pt-BR', {
+                              style: 'currency',
+                              currency: 'BRL',
+                            })}
+                          </span>
+                        </div>
+
+                        <div className="text-right">
+                          <span className="block text-[10px] font-medium text-texto-apoio">
+                            Saldo Inicial
+                          </span>
+                          <span className="text-xs font-semibold tabular-nums text-texto-apoio">
+                            {(Number(conta.saldo_inicial) || 0).toLocaleString('pt-BR', {
+                              style: 'currency',
+                              currency: 'BRL',
+                            })}
+                          </span>
                         </div>
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-1 opacity-90 group-hover:opacity-100">
-                      <button
-                        onClick={() => abrirModalEditar(conta)}
-                        className="p-1.5 rounded-lg text-texto-apoio hover:bg-verde-menta hover:text-verde-floresta transition-colors"
-                        title="Editar conta"
-                      >
-                        <Edit2 className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setContaParaExcluir(conta)
-                          setModalExcluirAberto(true)
-                        }}
-                        className="p-1.5 rounded-lg text-texto-apoio hover:bg-vermelho-suave/10 hover:text-vermelho-suave transition-colors"
-                        title="Excluir conta"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Detalhes de Identificação da Conta / Cartão */}
-                  {(conta.tipo === 'conta_corrente' || conta.tipo === 'poupanca') &&
-                    (conta.agencia || conta.conta || conta.numero_banco) && (
-                      <div className="text-[11px] text-texto-apoio bg-verde-menta/20 rounded-lg p-2 space-y-0.5">
-                        {conta.numero_banco && (
-                          <div>
-                            <span className="font-semibold text-texto-principal">Cód. Banco:</span>{' '}
-                            {conta.numero_banco}
-                          </div>
-                        )}
-                        {(conta.agencia || conta.agencia_digito) && (
-                          <div>
-                            <span className="font-semibold text-texto-principal">Agência:</span>{' '}
-                            {conta.agencia}
-                            {conta.agencia_digito ? `-${conta.agencia_digito}` : ''}
-                          </div>
-                        )}
-                        {(conta.conta || conta.conta_digito) && (
-                          <div>
-                            <span className="font-semibold text-texto-principal">Conta:</span>{' '}
-                            {conta.conta}
-                            {conta.conta_digito ? `-${conta.conta_digito}` : ''}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                  {conta.tipo === 'cartao_credito' &&
-                    (conta.bandeira || conta.numero_cartao_final || conta.validade) && (
-                      <div className="text-[11px] text-texto-apoio bg-verde-menta/20 rounded-lg p-2 space-y-0.5">
-                        {conta.bandeira && (
-                          <div>
-                            <span className="font-semibold text-texto-principal">Bandeira:</span>{' '}
-                            {conta.bandeira}
-                          </div>
-                        )}
-                        {conta.numero_cartao_final && (
-                          <div>
-                            <span className="font-semibold text-texto-principal">
-                              Cartão final:
-                            </span>{' '}
-                            •••• {conta.numero_cartao_final}
-                          </div>
-                        )}
-                        {conta.validade && (
-                          <div>
-                            <span className="font-semibold text-texto-principal">Validade:</span>{' '}
-                            {conta.validade}
-                          </div>
-                        )}
-                        {conta.nome_impresso && (
-                          <div>
-                            <span className="font-semibold text-texto-principal">Titular:</span>{' '}
-                            {conta.nome_impresso}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                  <div className="pt-2 border-t border-verde-menta/60 flex items-end justify-between">
-                    <div>
-                      <span className="block text-[11px] font-medium text-texto-apoio">
-                        Saldo Atual
-                      </span>
-                      <span
-                        className={`font-display text-xl font-bold tabular-nums ${
-                          saldoAtual >= 0 ? 'text-verde-sucesso' : 'text-vermelho-suave'
-                        }`}
-                      >
-                        {saldoAtual.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                      </span>
-                    </div>
-
-                    <div className="text-right">
-                      <span className="block text-[10px] font-medium text-texto-apoio">
-                        Saldo Inicial
-                      </span>
-                      <span className="text-xs font-semibold tabular-nums text-texto-apoio">
-                        {(Number(conta.saldo_inicial) || 0).toLocaleString('pt-BR', {
-                          style: 'currency',
-                          currency: 'BRL',
-                        })}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            )
-          })}
+                  </Card>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -629,6 +791,53 @@ export const ContasPage: React.FC = () => {
             <p className="text-[11px] text-texto-apoio mt-1">
               Saldo de partida antes do registro dos novos lançamentos no My Finance IA.
             </p>
+          </div>
+
+          {/* Status e Grupo da Conta */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-creme/50 border border-verde-menta/50">
+            <div>
+              <label
+                htmlFor={statusSelectId}
+                className="block text-xs font-semibold text-texto-principal mb-1.5"
+              >
+                Status da Conta
+              </label>
+              <select
+                id={statusSelectId}
+                value={statusId}
+                onChange={(e) => setStatusId(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-verde-menta bg-white text-xs text-texto-principal focus:outline-none focus:ring-2 focus:ring-verde-sage"
+              >
+                <option value="">Sem status definido</option>
+                {listaStatus.map((st) => (
+                  <option key={st.id} value={st.id}>
+                    {st.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label
+                htmlFor={grupoSelectId}
+                className="block text-xs font-semibold text-texto-principal mb-1.5"
+              >
+                Grupo Organizacional
+              </label>
+              <select
+                id={grupoSelectId}
+                value={grupoId}
+                onChange={(e) => setGrupoId(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-verde-menta bg-white text-xs text-texto-principal focus:outline-none focus:ring-2 focus:ring-verde-sage"
+              >
+                <option value="">Sem grupo (Nenhum)</option>
+                {listaGrupos.map((gr) => (
+                  <option key={gr.id} value={gr.id}>
+                    {gr.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Campos Específicos: Conta Corrente / Poupança */}

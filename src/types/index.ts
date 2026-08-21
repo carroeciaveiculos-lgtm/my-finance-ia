@@ -17,6 +17,24 @@ export interface UserSession {
 
 export type TipoConta = 'conta_corrente' | 'poupanca' | 'cartao_credito' | 'dinheiro' | 'outro'
 
+export interface ContaStatus {
+  id: string
+  user_id: string | null
+  nome: string
+  cor: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ContaGrupo {
+  id: string
+  user_id: string | null
+  nome: string
+  cor: string
+  created_at: string
+  updated_at: string
+}
+
 export interface Conta {
   id: string
   user_id: string
@@ -33,6 +51,10 @@ export interface Conta {
   numero_cartao_final?: string | null
   validade?: string | null
   nome_impresso?: string | null
+  status_id?: string | null
+  grupo_id?: string | null
+  status?: ContaStatus | null
+  grupo?: ContaGrupo | null
   created_at: string
   updated_at: string
 }
@@ -81,7 +103,30 @@ export interface DocumentoImportado {
   conta_id: string | null
   status: StatusDocumento
   caminho_storage: string | null
+  total_lancamentos?: number
+  total_valor?: number
   created_at: string
+}
+
+export interface LancamentoImportadoPrevia {
+  id_temporario: string
+  data: string
+  descricao: string
+  valor: number
+  tipo: 'receita' | 'despesa'
+  categoria_id?: string | null
+  subcategoria_id?: string | null
+  categoria_sugerida?: string | null
+  subcategoria_sugerida?: string | null
+  sugestao_ia?: boolean
+  duplicado_provavel?: boolean
+  ignorar?: boolean
+}
+
+export interface ResultadoImportacao {
+  documento: DocumentoImportado | null
+  lancamentos: LancamentoImportadoPrevia[]
+  total_extraidos: number
 }
 
 export type StatusConciliacao = 'correspondido' | 'nao_correspondido' | 'divergente' | 'revisao'

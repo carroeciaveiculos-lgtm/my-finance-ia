@@ -9,7 +9,7 @@ export const contasService = {
     try {
       const { data, error } = await rawClient
         .from('contas')
-        .select('*')
+        .select('*, status:status_id(*), grupo:grupo_id(*)')
         .order('nome', { ascending: true })
 
       if (error) throw error
@@ -44,6 +44,8 @@ export const contasService = {
     numero_cartao_final?: string | null
     validade?: string | null
     nome_impresso?: string | null
+    status_id?: string | null
+    grupo_id?: string | null
   }): Promise<{ data: Conta | null; error: Error | null }> {
     try {
       const {
@@ -70,6 +72,8 @@ export const contasService = {
             : null,
           validade: conta.validade || null,
           nome_impresso: conta.nome_impresso || null,
+          status_id: conta.status_id || null,
+          grupo_id: conta.grupo_id || null,
         })
         .select()
         .single()

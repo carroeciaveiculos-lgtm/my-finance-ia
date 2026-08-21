@@ -1,956 +1,1018 @@
-import React, { useState, useEffect, useRef, useId } from 'react'
+import React, { useState, useEffect, useId, useRef } from 'react'
 import { contasService } from '@/services/contas'
-import { lancamentosService } from '@/services/lancamentos'
 import { categoriasService } from '@/services/categorias'
 import { documentosService } from '@/services/documentos'
-import { supabase } from '@/lib/supabase/client'
-import { parseCSV, parseXLSX, parsePDF, COLUNAS_ESPERADAS_AJUDA } from '@/services/importacaoParser'
-import { classificarEAutoCategorizar, type ItemPreviaImportacao } from '@/services/importacaoEngine'
-import type { Conta, Categoria, DocumentoImportado, TipoDocumento } from '@/types'
-import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { lancamentosService } from '@/services/lancamentos'
+import { processarDocumentoImportado } from '@/services/importacaoEngine'
+import { formatarMoeda, formatarData } from '@/lib/utils'
+import type {
+  Conta,
+  Categoria,
+  DocumentoImportado,
+  ResultadoImportacao,
+  LancamentoImportadoPrevia,
+} from '@/types'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Botao } from '@/components/ui/botao'
 import { Modal } from '@/components/ui/modal'
 import { useToast } from '@/hooks/use-toast'
 import {
-  UploadCloud,
+  Upload,
   FileSpreadsheet,
   FileText,
-  AlertTriangle,
   CheckCircle2,
-  XCircle,
-  Plus,
-  RefreshCw,
-  Clock,
-  Check,
-  AlertCircle,
+  AlertTriangle,
   HelpCircle,
+  Clock,
+  ArrowRight,
+  Sparkles,
+  Info,
+  Check,
   ChevronDown,
   ChevronUp,
-  FileEdit,
+  X,
+  File,
+  Trash2,
+  AlertCircle,
+  FileCode,
+  Layers,
 } from 'lucide-react'
+
+const EXTENSOES_PERMITIDAS = ['.ofx', '.csv', '.xlsx', '.xls', '.pdf']
+
+interface ArquivoSelecionado {
+  id: string
+  file: File
+  nome: string
+  tamanho: number
+  tipo: string
+}
 
 export const ImportacaoPage: React.FC = () => {
   const { toast } = useToast()
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Estados principais
   const [contas, setContas] = useState<Conta[]>([])
   const [categorias, setCategorias] = useState<Categoria[]>([])
-  const [historicoDocumentos, setHistoricoDocumentos] = useState<DocumentoImportado[]>([])
-  const [carregando, setCarregando] = useState(true)
+  const [documentos, setDocumentos] = useState<DocumentoImportado[]>([])
+  const [carregandoDados, setCarregandoDados] = useState(true)
 
-  // Conta Selecionada para o Upload
-  const [contaSelecionadaId, setContaSelecionadaId] = useState<string>('')
-  const [modalNovaContaAberto, setModalNovaContaAberto] = useState(false)
-  const [nomeNovaConta, setNomeNovaConta] = useState('')
-  const [salvandoNovaConta, setSalvandoNovaConta] = useState(false)
+  // Seleção múltipla de arquivos
+  const [arquivosSelecionados, setArquivosSelecionados] = useState<ArquivoSelecionado[]>([])
+  const [contaDestinoId, setContaDestinoId] = useState<string>('')
+  const [arrastando, setArrastando] = useState(false)
+  const inputArquivoRef = useRef<HTMLInputElement | null>(null)
 
-  // Estado do Arquivo / Upload / Parsing
-  const [processandoArquivo, setProcessandoArquivo] = useState(false)
-  const [erroParsing, setErroParsing] = useState<string | null>(null)
-  const [mostrarGuiaAjuda, setMostrarGuiaAjuda] = useState(false)
+  // Estado de processamento
+  const [processando, setProcessando] = useState(false)
+  const [progressoTexto, setProgressoTexto] = useState('')
+  const [resultadosLote, setResultadosLote] = useState<ResultadoImportacao[]>([])
 
-  // Estado da Prévia
-  const [etapaAtual, setEtapaAtual] = useState<'upload' | 'previa' | 'sucesso'>('upload')
-  const [itensPrevia, setItensPrevia] = useState<ItemPreviaImportacao[]>([])
-  const [documentoIdGerado, setDocumentoIdGerado] = useState<string | null>(null)
-  const [salvandoImportacao, setSalvandoImportacao] = useState(false)
-  const [totalImportadosSucesso, setTotalImportadosSucesso] = useState(0)
+  // Pré-visualização e Edição
+  const [emPrevia, setEmPrevia] = useState(false)
+  const [previaLancamentos, setPreviaLancamentos] = useState<LancamentoImportadoPrevia[]>([])
+  const [totaisPrevia, setTotaisPrevia] = useState({
+    total: 0,
+    receitas: 0,
+    despesas: 0,
+    duplicados: 0,
+    valorTotal: 0,
+  })
+
+  // Salvando no banco
+  const [salvando, setSalvando] = useState(false)
+  const [sucessoModal, setSucessoModal] = useState(false)
+  const [salvosResumo, setSalvosResumo] = useState({ total: 0, valor: 0 })
+
+  // Modal de Exclusão de Documento
+  const [modalExcluirDocAberto, setModalExcluirDocAberto] = useState(false)
+  const [documentoParaExcluir, setDocumentoParaExcluir] = useState<DocumentoImportado | null>(null)
+  const [totalLancamentosVinculados, setTotalLancamentosVinculados] = useState(0)
+  const [tipoExclusao, setTipoExclusao] = useState<'apenas_registro' | 'documento_e_lancamentos'>(
+    'apenas_registro',
+  )
+  const [excluindoDoc, setExcluindoDoc] = useState(false)
+
+  // Accordion de ajuda
+  const [ajudaAberta, setAjudaAberta] = useState(false)
 
   const contaSelectId = useId()
-  const nomeNovaContaId = useId()
 
-  const carregarDadosIniciais = async () => {
-    setCarregando(true)
+  // Carregar dados iniciais de forma ultra-resiliente
+  const carregarTudo = async () => {
+    setCarregandoDados(true)
     try {
-      const [resContas, resCats, resDocs] = await Promise.all([
-        contasService.listar(),
-        categoriasService.listarArvore(),
-        documentosService.listar(),
+      const [resContas, resCategorias, resDocs] = await Promise.all([
+        contasService.listar().catch(() => ({ data: [], error: null })),
+        categoriasService.listarArvore().catch(() => ({ data: [], error: null })),
+        documentosService.listar().catch(() => ({ data: [], error: null })),
       ])
 
-      if (resContas && resContas.error) {
-        console.warn('Aviso ao carregar contas:', resContas.error.message)
-      }
-      if (resCats && resCats.error) {
-        console.warn('Aviso ao carregar categorias:', resCats.error.message)
-      }
-      if (resDocs && resDocs.error) {
-        console.warn('Aviso ao carregar documentos:', resDocs.error.message)
+      const listaContas = resContas && resContas.data ? resContas.data : []
+      setContas(listaContas)
+      if (listaContas.length > 0 && !contaDestinoId) {
+        setContaDestinoId(listaContas[0].id)
       }
 
-      const contasCarregadas = Array.isArray(resContas?.data) ? resContas.data : []
-      setContas(contasCarregadas)
-      if (contasCarregadas.length > 0) {
-        setContaSelecionadaId((prev) => {
-          if (prev && contasCarregadas.some((c) => c.id === prev)) {
-            return prev
-          }
-          return contasCarregadas[0].id
-        })
-      }
-
-      const categoriasCarregadas = Array.isArray(resCats?.data) ? resCats.data : []
-      setCategorias(categoriasCarregadas)
-
-      const docsCarregados = Array.isArray(resDocs?.data) ? resDocs.data : []
-      setHistoricoDocumentos(docsCarregados)
+      setCategorias(resCategorias && resCategorias.data ? resCategorias.data : [])
+      setDocumentos(resDocs && resDocs.data ? resDocs.data : [])
     } catch (err: unknown) {
-      console.error('Erro no carregamento inicial de importação:', err)
+      console.error('Erro ao carregar dados da página de importação:', err)
       toast({
-        title: 'Erro ao carregar dados da página',
-        description: (err as Error).message || 'Tente recarregar a página.',
+        title: 'Aviso ao carregar dados',
+        description: 'Algumas informações auxiliares não puderam ser recuperadas no momento.',
         variant: 'destructive',
       })
-      setContas([])
-      setCategorias([])
-      setHistoricoDocumentos([])
     } finally {
-      setCarregando(false)
+      setCarregandoDados(false)
     }
   }
 
   useEffect(() => {
-    carregarDadosIniciais()
+    carregarTudo()
   }, [])
 
-  // Criar rápida de nova conta
-  const handleCriarNovaContaRapida = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!nomeNovaConta.trim()) return
+  // Utilitário para ícone de arquivo
+  const getIconeArquivo = (nome: string) => {
+    const ext = nome.split('.').pop()?.toLowerCase()
+    if (ext === 'ofx') return <FileCode className="h-5 w-5 text-emerald-600" />
+    if (ext === 'csv') return <FileSpreadsheet className="h-5 w-5 text-blue-600" />
+    if (ext === 'xlsx' || ext === 'xls')
+      return <FileSpreadsheet className="h-5 w-5 text-green-700" />
+    if (ext === 'pdf') return <FileText className="h-5 w-5 text-red-600" />
+    return <File className="h-5 w-5 text-texto-apoio" />
+  }
 
-    setSalvandoNovaConta(true)
-    const { data, error } = await contasService.criar({
-      nome: nomeNovaConta.trim(),
-      tipo: 'conta_corrente',
-      saldo_inicial: 0,
+  // Tratamento de arquivos
+  const validarEAdicionarArquivos = (files: FileList | File[]) => {
+    const novos: ArquivoSelecionado[] = []
+    const ignorados: string[] = []
+
+    Array.from(files).forEach((f) => {
+      const ext = `.${f.name.split('.').pop()?.toLowerCase()}`
+      if (EXTENSOES_PERMITIDAS.includes(ext)) {
+        // Evita duplicatas pelo nome e tamanho
+        const jaExiste = arquivosSelecionados.some((a) => a.nome === f.name && a.tamanho === f.size)
+        if (!jaExiste) {
+          novos.push({
+            id: `${f.name}-${f.size}-${Date.now()}-${Math.random()}`,
+            file: f,
+            nome: f.name,
+            tamanho: f.size,
+            tipo: ext.replace('.', '').toUpperCase(),
+          })
+        }
+      } else {
+        ignorados.push(f.name)
+      }
     })
 
-    if (error) {
-      toast({ title: 'Erro ao criar conta', description: error.message, variant: 'destructive' })
-    } else if (data) {
-      toast({ title: 'Conta criada com sucesso!' })
-      setContas((prev) => [...prev, data])
-      setContaSelecionadaId(data.id)
-      setNomeNovaConta('')
-      setModalNovaContaAberto(false)
-    }
-    setSalvandoNovaConta(false)
-  }
-
-  // Handler de seleção de arquivo
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) {
-      processarArquivoUpload(file)
-    }
-  }
-
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    const file = e.dataTransfer.files?.[0]
-    if (file) {
-      processarArquivoUpload(file)
-    }
-  }
-
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-  }
-
-  // Processa o arquivo selecionado
-  const processarArquivoUpload = async (file: File) => {
-    if (!contaSelecionadaId) {
+    if (ignorados.length > 0) {
       toast({
-        title: 'Selecione uma conta',
-        description:
-          'Por favor, selecione qual conta bancária pertence este extrato antes do envio.',
+        title: 'Formato não suportado',
+        description: `Arquivos ignorados: ${ignorados.join(', ')}. Use OFX, CSV, Excel ou PDF.`,
+        variant: 'destructive',
+      })
+    }
+
+    if (novos.length > 0) {
+      setArquivosSelecionados((prev) => [...prev, ...novos])
+    }
+  }
+
+  const removerArquivo = (id: string) => {
+    setArquivosSelecionados((prev) => prev.filter((a) => a.id !== id))
+  }
+
+  const limparTodosArquivos = () => {
+    setArquivosSelecionados([])
+    if (inputArquivoRef.current) {
+      inputArquivoRef.current.value = ''
+    }
+  }
+
+  // Drag and drop handlers
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setArrastando(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setArrastando(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setArrastando(false)
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      validarEAdicionarArquivos(e.dataTransfer.files)
+    }
+  }
+
+  // Processamento em lote de todos os arquivos selecionados
+  const handleProcessarTodos = async () => {
+    if (arquivosSelecionados.length === 0) {
+      toast({
+        title: 'Nenhum arquivo selecionado',
+        description: 'Por favor, selecione ao menos um extrato para importar.',
         variant: 'destructive',
       })
       return
     }
 
-    const extensao = file.name.split('.').pop()?.toLowerCase()
-    let tipoDoc: TipoDocumento = 'csv'
-    if (extensao === 'xlsx') tipoDoc = 'xlsx'
-    else if (extensao === 'xls') tipoDoc = 'xls'
-    else if (extensao === 'pdf') tipoDoc = 'pdf'
-    else if (extensao === 'ofx') tipoDoc = 'ofx'
-    else if (extensao === 'csv') tipoDoc = 'csv'
-    else {
-      setErroParsing('Formato de arquivo não suportado. Envie um arquivo CSV, XLS, XLSX ou PDF.')
+    if (!contaDestinoId) {
+      toast({
+        title: 'Selecione uma conta de destino',
+        description: 'Escolha a conta onde esses lançamentos serão alocados.',
+        variant: 'destructive',
+      })
       return
     }
 
-    setProcessandoArquivo(true)
-    setErroParsing(null)
+    setProcessando(true)
+    const todosResultados: ResultadoImportacao[] = []
+    const todosLancamentosPrevia: LancamentoImportadoPrevia[] = []
 
     try {
-      let parseResult: { sucesso: boolean; itens: any[]; erro?: string } = {
-        sucesso: false,
-        itens: [],
-      }
-
-      // Leitura de acordo com o tipo
-      if (tipoDoc === 'csv' || tipoDoc === 'ofx') {
-        const text = await file.text()
-        parseResult = parseCSV(text)
-      } else if (tipoDoc === 'xlsx' || tipoDoc === 'xls') {
-        const buffer = await file.arrayBuffer()
-        parseResult = parseXLSX(buffer)
-      } else if (tipoDoc === 'pdf') {
-        const buffer = await file.arrayBuffer()
-        parseResult = await parsePDF(buffer)
-      }
-
-      // Se falhou no parse
-      if (!parseResult.sucesso || !parseResult.itens || parseResult.itens.length === 0) {
-        // Registra documento no banco com status 'nao_importado' (garantia de rastreabilidade segura)
-        await documentosService.registrar({
-          nome_arquivo: file.name,
-          tipo: tipoDoc,
-          conta_id: contaSelecionadaId,
-          status: 'nao_importado',
-        })
-        carregarDadosIniciais()
-
-        setErroParsing(
-          parseResult.erro ||
-            'Não foi possível reconhecer o layout deste arquivo. Verifique se possui colunas com Data e Valor.',
+      for (let i = 0; i < arquivosSelecionados.length; i++) {
+        const item = arquivosSelecionados[i]
+        setProgressoTexto(
+          `Processando arquivo ${i + 1} de ${arquivosSelecionados.length}: ${item.nome}...`,
         )
-        setProcessandoArquivo(false)
+
+        const resultado = await processarDocumentoImportado(item.file, contaDestinoId)
+        todosResultados.push(resultado)
+
+        if (resultado.lancamentos && resultado.lancamentos.length > 0) {
+          resultado.lancamentos.forEach((l, idx) => {
+            todosLancamentosPrevia.push({
+              ...l,
+              id_temporario: `${item.id}-${idx}-${l.id_temporario}`,
+              ignorar: l.ignorar || l.duplicado_provavel || false,
+            })
+          })
+        }
+      }
+
+      setResultadosLote(todosResultados)
+
+      if (todosLancamentosPrevia.length === 0) {
+        toast({
+          title: 'Nenhum lançamento identificado',
+          description:
+            'Não foi possível extrair transações dos arquivos enviados. Verifique o formato.',
+          variant: 'destructive',
+        })
+        setProcessando(false)
         return
       }
 
-      // Tenta upload do arquivo no Storage (bucket "extratos") de forma silenciosa e segura
-      let caminhoStorage: string | null = null
-      try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser()
-        if (user) {
-          const filePath = `${user.id}/${Date.now()}_${file.name}`
-          const { data: storageUpload } = await supabase.storage
-            .from('extratos')
-            .upload(filePath, file, { upsert: true })
-          if (storageUpload) {
-            caminhoStorage = storageUpload.path
-          }
-        }
-      } catch (storageErr) {
-        console.warn('Storage upload notice:', storageErr)
-      }
+      // Calcula totais da prévia
+      atualizarTotais(todosLancamentosPrevia)
+      setPreviaLancamentos(todosLancamentosPrevia)
+      setEmPrevia(true)
 
-      // Registra o documento como "processado" (aguardando confirmação do usuário)
-      const resDoc = await documentosService.registrar({
-        nome_arquivo: file.name,
-        tipo: tipoDoc,
-        conta_id: contaSelecionadaId,
-        status: 'processado',
-        caminho_storage: caminhoStorage,
+      toast({
+        title: 'Arquivos lidos com sucesso!',
+        description: `${todosLancamentosPrevia.length} lançamentos identificados para conferência.`,
       })
-
-      if (resDoc && resDoc.data) {
-        setDocumentoIdGerado(resDoc.data.id)
-      }
-
-      // Busca todos os lançamentos existentes do usuário para deduplicação e auto-categorização
-      const resLancExistentes = await lancamentosService.listar()
-      const lancamentosExistentes = Array.isArray(resLancExistentes?.data)
-        ? resLancExistentes.data
-        : []
-
-      // Extrai todas as categorias planas (pais e filhas)
-      const categoriasPlanas: Categoria[] = []
-      if (Array.isArray(categorias)) {
-        categorias.forEach((c) => {
-          categoriasPlanas.push(c)
-          if (c.subcategorias && Array.isArray(c.subcategorias)) {
-            c.subcategorias.forEach((s) => categoriasPlanas.push(s))
-          }
-        })
-      }
-
-      // Classifica em 3 grupos + Auto-categorização estrita
-      const itensClassificados = classificarEAutoCategorizar({
-        itensExtraidos: parseResult.itens,
-        lancamentosExistentes,
-        categorias: categoriasPlanas,
-      })
-
-      setItensPrevia(itensClassificados)
-      setEtapaAtual('previa')
     } catch (err: unknown) {
-      setErroParsing(`Erro no processamento do arquivo: ${(err as Error).message}`)
+      console.error('Erro ao processar lote:', err)
+      toast({
+        title: 'Falha no processamento',
+        description:
+          err instanceof Error ? err.message : 'Ocorreu um erro ao interpretar um dos extratos.',
+        variant: 'destructive',
+      })
     } finally {
-      setProcessandoArquivo(false)
+      setProcessando(false)
+      setProgressoTexto('')
     }
   }
 
-  // Alteração manual de categoria de um item da prévia
-  const handleAlterarCategoriaItem = (idTemp: string, novaCategoriaId: string) => {
-    setItensPrevia((prev) =>
-      prev.map((item) => {
-        if (item.idTemp !== idTemp) return item
-        const cat = categorias.find((c) => c.id === novaCategoriaId)
-        return {
-          ...item,
-          categoria_id: novaCategoriaId || null,
-          subcategoria_id: null,
-          categoriaNomeSugerida: cat?.nome,
+  const atualizarTotais = (lista: LancamentoImportadoPrevia[]) => {
+    const ativos = lista.filter((l) => !l.ignorar)
+    const receitas = ativos.filter((l) => l.tipo === 'receita').length
+    const despesas = ativos.filter((l) => l.tipo === 'despesa').length
+    const duplicados = lista.filter((l) => l.duplicado_provavel).length
+    const valorTotal = ativos.reduce((acc, l) => {
+      const val = l.tipo === 'receita' ? l.valor : -l.valor
+      return acc + val
+    }, 0)
+
+    setTotaisPrevia({
+      total: ativos.length,
+      receitas,
+      despesas,
+      duplicados,
+      valorTotal,
+    })
+  }
+
+  // Modificações na tabela de prévia
+  const toggleIgnorarLancamento = (idTemp: string) => {
+    setPreviaLancamentos((prev) => {
+      const atualizados = prev.map((l) => {
+        if (l.id_temporario === idTemp) {
+          return { ...l, ignorar: !l.ignorar }
         }
-      }),
+        return l
+      })
+      atualizarTotais(atualizados)
+      return atualizados
+    })
+  }
+
+  const handleAlterarCategoriaLancamento = (idTemp: string, subId: string) => {
+    setPreviaLancamentos((prev) => {
+      const atualizados = prev.map((l) => {
+        if (l.id_temporario === idTemp) {
+          // Encontra a categoria pai
+          let paiId: string | null = null
+          categorias.forEach((pai) => {
+            if (pai.subcategorias?.some((s) => s.id === subId)) {
+              paiId = pai.id
+            }
+          })
+          return {
+            ...l,
+            subcategoria_id: subId || null,
+            categoria_id: paiId || l.categoria_id,
+          }
+        }
+        return l
+      })
+      return atualizados
+    })
+  }
+
+  const handleAlterarDescricao = (idTemp: string, novaDesc: string) => {
+    setPreviaLancamentos((prev) =>
+      prev.map((l) => (l.id_temporario === idTemp ? { ...l, descricao: novaDesc } : l)),
     )
   }
 
-  const handleAlterarSubcategoriaItem = (idTemp: string, novaSubId: string) => {
-    setItensPrevia((prev) =>
-      prev.map((item) => {
-        if (item.idTemp !== idTemp) return item
-        return {
-          ...item,
-          subcategoria_id: novaSubId || null,
+  const handleAlterarTipo = (idTemp: string, novoTipo: 'receita' | 'despesa') => {
+    setPreviaLancamentos((prev) => {
+      const atualizados = prev.map((l) => {
+        if (l.id_temporario === idTemp) {
+          return { ...l, tipo: novoTipo }
         }
-      }),
-    )
+        return l
+      })
+      atualizarTotais(atualizados)
+      return atualizados
+    })
   }
 
-  const handleToggleSelecaoItem = (idTemp: string) => {
-    setItensPrevia((prev) =>
-      prev.map((item) => {
-        if (item.idTemp !== idTemp) return item
-        return {
-          ...item,
-          selecionadoParaSalvar: !item.selecionadoParaSalvar,
-        }
-      }),
-    )
-  }
+  // Confirmar e Salvar Lançamentos no Banco
+  const handleConfirmarImportacaoFinal = async () => {
+    const lancamentosParaSalvar = previaLancamentos.filter((l) => !l.ignorar)
 
-  // Grupos visuais da prévia
-  const itensVaiLancar = itensPrevia.filter((i) => i.grupo === 'vai_lancar')
-  const itensJaExiste = itensPrevia.filter((i) => i.grupo === 'ja_existe')
-  const itensRevisao = itensPrevia.filter((i) => i.grupo === 'precisa_revisao')
-
-  const totalParaSalvar = itensPrevia.filter((i) => i.selecionadoParaSalvar).length
-
-  // Confirmação final da importação
-  const handleConfirmarImportacao = async () => {
-    const itensParaPersistir = itensPrevia.filter((i) => i.selecionadoParaSalvar)
-    if (itensParaPersistir.length === 0) {
+    if (lancamentosParaSalvar.length === 0) {
       toast({
-        title: 'Nenhum item selecionado',
-        description: 'Selecione pelo menos um lançamento para confirmar a importação.',
+        title: 'Nenhum lançamento selecionado',
+        description: 'Todos os lançamentos estão marcados para serem ignorados.',
         variant: 'destructive',
       })
       return
     }
 
-    setSalvandoImportacao(true)
+    setSalvando(true)
 
     try {
-      let inseridosComSucesso = 0
-      for (const item of itensParaPersistir) {
+      let salvosCount = 0
+      let totalValor = 0
+
+      // Salva os lançamentos vinculados aos documentos criados
+      for (const item of lancamentosParaSalvar) {
+        // Encontra o docId correspondente
+        const docCorrespondente = resultadosLote.find((r) =>
+          r.lancamentos.some(
+            (original) =>
+              original.data === item.data &&
+              original.valor === item.valor &&
+              original.descricao === item.descricao,
+          ),
+        )
+        const documentoId =
+          docCorrespondente?.documento?.id || resultadosLote[0]?.documento?.id || null
+
         const { error } = await lancamentosService.criar({
+          conta_id: contaDestinoId,
+          categoria_id: item.categoria_id || null,
+          subcategoria_id: item.subcategoria_id || null,
           tipo: item.tipo,
           valor: item.valor,
           data: item.data,
           descricao: item.descricao,
-          categoria_id: item.categoria_id,
-          subcategoria_id: item.subcategoria_id,
-          conta_id: contaSelecionadaId,
-          documento_id: documentoIdGerado,
+          origem: 'importacao',
+          documento_id: documentoId,
         })
+
         if (!error) {
-          inseridosComSucesso++
+          salvosCount++
+          totalValor += item.valor
         }
       }
 
-      // Atualiza status do documento para 'importado'
-      if (documentoIdGerado) {
-        await documentosService.atualizarStatus(documentoIdGerado, 'importado')
-      }
-
-      setTotalImportadosSucesso(inseridosComSucesso)
-      setEtapaAtual('sucesso')
-      toast({
-        title: 'Importação concluída com sucesso!',
-        description: `${inseridosComSucesso} lançamentos foram persistidos na conta.`,
-      })
-      carregarDadosIniciais()
+      setSalvosResumo({ total: salvosCount, valor: totalValor })
+      setSucessoModal(true)
+      setEmPrevia(false)
+      setArquivosSelecionados([])
+      setPreviaLancamentos([])
+      carregarTudo()
     } catch (err: unknown) {
+      console.error('Erro ao salvar lançamentos importados:', err)
       toast({
-        title: 'Erro ao persistir lançamentos',
-        description: (err as Error).message,
+        title: 'Erro ao salvar',
+        description: 'Não foi possível gravar alguns lançamentos. Tente novamente.',
         variant: 'destructive',
       })
     } finally {
-      setSalvandoImportacao(false)
+      setSalvando(false)
     }
   }
 
-  const reiniciarImportacao = () => {
-    setEtapaAtual('upload')
-    setItensPrevia([])
-    setErroParsing(null)
-    setDocumentoIdGerado(null)
-    if (fileInputRef.current) fileInputRef.current.value = ''
+  // ==========================================
+  // EXCLUSÃO DE DOCUMENTO DO HISTÓRICO
+  // ==========================================
+  const abrirModalExcluirDoc = async (doc: DocumentoImportado) => {
+    setDocumentoParaExcluir(doc)
+    setTipoExclusao('apenas_registro')
+    const count = await documentosService.contarLancamentos(doc.id)
+    setTotalLancamentosVinculados(count)
+    setModalExcluirDocAberto(true)
   }
+
+  const handleConfirmarExclusaoDoc = async () => {
+    if (!documentoParaExcluir) return
+
+    setExcluindoDoc(true)
+    try {
+      if (tipoExclusao === 'apenas_registro') {
+        const { error } = await documentosService.excluirApenasRegistro(documentoParaExcluir.id)
+        if (error) throw error
+        toast({
+          title: 'Histórico removido',
+          description: 'O registro do documento foi excluído. Os lançamentos foram mantidos.',
+        })
+      } else {
+        const { error } = await documentosService.excluirDocumentoELancamentos(
+          documentoParaExcluir.id,
+        )
+        if (error) throw error
+        toast({
+          title: 'Documento e lançamentos excluídos',
+          description: `O documento e todos os ${totalLancamentosVinculados} lançamentos vinculados foram excluídos com sucesso.`,
+        })
+      }
+
+      setModalExcluirDocAberto(false)
+      setDocumentoParaExcluir(null)
+      carregarTudo()
+    } catch (err: unknown) {
+      toast({
+        title: 'Erro ao excluir documento',
+        description: err instanceof Error ? err.message : 'Falha na exclusão.',
+        variant: 'destructive',
+      })
+    } finally {
+      setExcluindoDoc(false)
+    }
+  }
+
+  // Categorias disponíveis para o dropdown da tabela
+  const todasSubcategorias = categorias.flatMap((c) =>
+    (c.subcategorias || []).map((sub) => ({
+      id: sub.id,
+      nome: `${c.nome} > ${sub.nome}`,
+      tipo: c.tipo,
+    })),
+  )
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header Topo */}
+      {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="font-display font-bold text-2xl sm:text-3xl text-verde-floresta tracking-tight">
-            Importação Inteligente de Extratos
+            Importação de Extratos & Comprovantes
           </h1>
           <p className="text-sm text-texto-apoio mt-1">
-            Importe arquivos CSV, XLS, XLSX ou PDF com reconhecimento flexível de colunas,
-            deduplicação rigorosa e auto-categorização histórica.
+            Importe um ou múltiplos arquivos (OFX, CSV, Excel, PDF) com auto-categorização
+            inteligente do James IA.
           </p>
         </div>
 
-        {etapaAtual !== 'upload' && (
-          <Botao variant="secondary" size="sm" onClick={reiniciarImportacao}>
-            Importar Outro Arquivo
+        {emPrevia && (
+          <Botao
+            variant="ghost"
+            onClick={() => {
+              setEmPrevia(false)
+            }}
+          >
+            ← Voltar para Seleção de Arquivos
           </Botao>
         )}
       </div>
 
       {/* ======================================================== */}
-      {/* ETAPA 1: SELEÇÃO DA CONTA + DROPZONE DE UPLOAD           */}
+      {/* MODO 1: UPLOAD & CONFIGURAÇÃO                            */}
       {/* ======================================================== */}
-      {etapaAtual === 'upload' && (
-        <div className="space-y-6">
-          {/* Card de Configuração Inicial da Importação */}
-          <Card className="border-verde-menta bg-white shadow-sm p-5">
-            <div className="max-w-xl space-y-4">
-              <div>
-                <label
-                  htmlFor={contaSelectId}
-                  className="block text-xs font-semibold text-texto-principal mb-1.5"
-                >
-                  1. Selecione a Conta Destino do Extrato *
-                </label>
-                <div className="flex items-center gap-2">
-                  <select
-                    id={contaSelectId}
-                    value={contaSelecionadaId}
-                    onChange={(e) => setContaSelecionadaId(e.target.value)}
-                    className="flex-1 px-3.5 py-2.5 rounded-xl border border-verde-menta bg-creme/30 text-sm text-texto-principal focus:outline-none focus:ring-2 focus:ring-verde-sage focus:bg-white transition-all font-medium"
-                  >
-                    {contas.length === 0 && <option value="">Nenhuma conta cadastrada</option>}
-                    {contas.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.nome} {c.banco ? `(${c.banco})` : ''} — Saldo inicial: R${' '}
-                        {Number(c.saldo_inicial || 0).toFixed(2)}
-                      </option>
-                    ))}
-                  </select>
-
-                  <Botao
-                    type="button"
-                    variant="menta"
-                    size="sm"
-                    onClick={() => setModalNovaContaAberto(true)}
-                    className="gap-1 whitespace-nowrap h-10 px-3"
-                  >
-                    <Plus className="h-4 w-4" />
-                    <span>Nova Conta</span>
-                  </Botao>
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          {/* Erro de Parsing / Mensagem Rica e Orientativa */}
-          {erroParsing && (
-            <div className="p-5 rounded-2xl bg-vermelho-suave/10 border border-vermelho-suave/30 text-texto-principal space-y-3 animate-fade-in">
-              <div className="flex items-start gap-3">
-                <AlertCircle className="h-5 w-5 text-vermelho-suave shrink-0 mt-0.5" />
-                <div className="space-y-1.5 text-xs flex-1">
-                  <strong className="text-vermelho-suave font-semibold text-sm block">
-                    Não foi possível processar este arquivo
-                  </strong>
-                  <p className="text-texto-principal leading-relaxed">{erroParsing}</p>
-                </div>
-              </div>
-
-              {/* Dicas e Alternativas Úteis */}
-              <div className="pt-2 border-t border-vermelho-suave/20 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div className="p-3 bg-white/70 rounded-xl border border-vermelho-suave/20 space-y-1">
-                  <span className="font-semibold text-verde-floresta flex items-center gap-1.5">
-                    <FileSpreadsheet className="h-4 w-4 text-verde-floresta" />
-                    Opção 1: Exportar em XLSX / CSV
+      {!emPrevia && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Coluna Esquerda: Área de Upload & Fila de Arquivos */}
+          <div className="lg:col-span-2 space-y-6">
+            <Card className="border-verde-menta bg-white shadow-sm overflow-hidden">
+              <CardHeader className="bg-creme/40 border-b border-verde-menta/60 pb-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Upload className="h-5 w-5 text-verde-floresta" />
+                    <CardTitle className="text-base text-verde-floresta">
+                      Upload de Arquivos em Lote
+                    </CardTitle>
+                  </div>
+                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-verde-menta text-verde-floresta">
+                    Seleção Múltipla Ativa
                   </span>
-                  <p className="text-texto-apoio text-[11px]">
-                    No app ou Internet Banking do seu banco, escolha exportar o extrato no formato{' '}
-                    <strong>XLSX</strong> ou <strong>CSV</strong>.
-                  </p>
                 </div>
+                <CardDescription className="text-xs text-texto-apoio">
+                  Arraste ou selecione quantos extratos bancários, faturas de cartão ou relatórios
+                  precisar.
+                </CardDescription>
+              </CardHeader>
 
-                <div className="p-3 bg-white/70 rounded-xl border border-vermelho-suave/20 space-y-1">
-                  <span className="font-semibold text-verde-floresta flex items-center gap-1.5">
-                    <FileEdit className="h-4 w-4 text-verde-floresta" />
-                    Opção 2: Lançamento Manual
-                  </span>
-                  <p className="text-texto-apoio text-[11px]">
-                    Você também pode cadastrar seus lançamentos diretamente na aba{' '}
-                    <a href="/lancamentos" className="underline text-verde-floresta font-semibold">
-                      Lançamentos
-                    </a>
-                    .
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Guia de Formatos Aceitos (Accordion Expansível) */}
-          <Card className="border-verde-menta/70 bg-verde-menta/10 overflow-hidden shadow-none">
-            <button
-              type="button"
-              onClick={() => setMostrarGuiaAjuda(!mostrarGuiaAjuda)}
-              className="w-full p-3.5 px-5 flex items-center justify-between text-left hover:bg-verde-menta/20 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <HelpCircle className="h-4 w-4 text-verde-floresta shrink-0" />
-                <span className="text-xs font-semibold text-verde-floresta">
-                  Quais colunas e formatos são aceitos? (Clique para ver detalhes)
-                </span>
-              </div>
-              {mostrarGuiaAjuda ? (
-                <ChevronUp className="h-4 w-4 text-verde-floresta" />
-              ) : (
-                <ChevronDown className="h-4 w-4 text-verde-floresta" />
-              )}
-            </button>
-
-            {mostrarGuiaAjuda && (
-              <div className="p-5 pt-1 border-t border-verde-menta/50 text-xs text-texto-principal space-y-3 bg-white/50 animate-fade-in">
-                <p className="text-texto-apoio text-[11px]">
-                  O parser do My Finance IA reconhece automaticamente cabeçalhos case-insensitive,
-                  linhas extras no topo de extratos bancários e múltiplos delimitadores (vírgula,
-                  ponto e vírgula, tabulação ou pipe).
-                </p>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
-                  <div className="p-3 bg-white rounded-xl border border-verde-menta/60">
-                    <span className="font-semibold text-verde-floresta block mb-1">
-                      📅 Coluna de Data
-                    </span>
-                    <ul className="text-[11px] text-texto-apoio space-y-0.5 list-disc pl-3">
-                      {COLUNAS_ESPERADAS_AJUDA.data.slice(0, 7).map((col) => (
-                        <li key={col}>{col}</li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div className="p-3 bg-white rounded-xl border border-verde-menta/60">
-                    <span className="font-semibold text-verde-floresta block mb-1">
-                      💰 Coluna de Valor
-                    </span>
-                    <ul className="text-[11px] text-texto-apoio space-y-0.5 list-disc pl-3">
-                      <li>Valor / Valor (R$) / Saldo</li>
-                      <li>Colunas separadas: Débito e Crédito</li>
-                      <li>Colunas separadas: Saída e Entrada</li>
-                    </ul>
-                  </div>
-
-                  <div className="p-3 bg-white rounded-xl border border-verde-menta/60">
-                    <span className="font-semibold text-verde-floresta block mb-1">
-                      📝 Coluna de Descrição
-                    </span>
-                    <ul className="text-[11px] text-texto-apoio space-y-0.5 list-disc pl-3">
-                      {COLUNAS_ESPERADAS_AJUDA.descricao.slice(0, 6).map((col) => (
-                        <li key={col}>{col}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            )}
-          </Card>
-
-          {/* Dropzone de Upload */}
-          <Card
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            onClick={() => fileInputRef.current?.click()}
-            className="border-dashed border-2 border-verde-sage/60 hover:border-verde-floresta bg-white hover:bg-verde-menta/10 transition-all duration-200 cursor-pointer p-10 text-center rounded-2xl shadow-sm"
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv,.xls,.xlsx,.pdf,.ofx"
-              onChange={handleFileChange}
-              className="hidden"
-            />
-
-            <div className="max-w-md mx-auto space-y-4">
-              <div className="h-16 w-16 rounded-3xl bg-verde-menta text-verde-floresta flex items-center justify-center mx-auto shadow-sm">
-                {processandoArquivo ? (
-                  <RefreshCw className="h-8 w-8 animate-spin text-verde-floresta" />
-                ) : (
-                  <UploadCloud className="h-8 w-8 text-verde-floresta" />
-                )}
-              </div>
-
-              <div className="space-y-1">
-                <h2 className="font-display font-bold text-lg text-verde-floresta">
-                  {processandoArquivo
-                    ? 'Analisando e estruturando seu arquivo...'
-                    : 'Clique ou arraste seu extrato bancário aqui'}
-                </h2>
-                <p className="text-xs text-texto-apoio">
-                  Formatos aceitos: <strong>CSV, XLS, XLSX</strong> (Recomendados) e{' '}
-                  <strong>PDF</strong>.
-                </p>
-              </div>
-
-              <div className="flex items-center justify-center gap-2 pt-2 flex-wrap">
-                <span className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-creme text-texto-apoio border border-verde-menta">
-                  Reconhecimento Flexível
-                </span>
-                <span className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-creme text-texto-apoio border border-verde-menta">
-                  Deduplicação 100%
-                </span>
-                <span className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-creme text-texto-apoio border border-verde-menta">
-                  Auto-categorização
-                </span>
-                <span className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-creme text-texto-apoio border border-verde-menta">
-                  Prévia Obrigatória
-                </span>
-              </div>
-            </div>
-          </Card>
-
-          {/* Histórico de Documentos Importados */}
-          <Card className="border-verde-menta bg-white shadow-sm overflow-hidden">
-            <CardHeader className="pb-3 border-b border-verde-menta/50">
-              <div className="flex items-center justify-between">
+              <CardContent className="p-6 space-y-5">
+                {/* Seleção de Conta de Destino */}
                 <div>
-                  <CardTitle className="text-base font-semibold text-verde-floresta">
+                  <label
+                    htmlFor={contaSelectId}
+                    className="block text-xs font-semibold text-texto-principal mb-1.5"
+                  >
+                    Conta Bancária de Destino *
+                  </label>
+                  {contas.length === 0 && !carregandoDados ? (
+                    <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs">
+                      Você ainda não possui contas cadastradas. Acesse o menu{' '}
+                      <a href="/contas" className="underline font-bold">
+                        Contas & Carteiras
+                      </a>{' '}
+                      para cadastrar sua primeira conta antes de importar.
+                    </div>
+                  ) : (
+                    <select
+                      id={contaSelectId}
+                      value={contaDestinoId}
+                      onChange={(e) => setContaDestinoId(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-verde-menta bg-white text-sm text-texto-principal focus:outline-none focus:ring-2 focus:ring-verde-sage"
+                    >
+                      {contas.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.nome} {c.banco ? `(${c.banco})` : ''} - Saldo inicial:{' '}
+                          {formatarMoeda(Number(c.saldo_inicial) || 0)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {/* Dropzone com suporte a múltiplos arquivos */}
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onClick={() => inputArquivoRef.current?.click()}
+                  className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all ${
+                    arrastando
+                      ? 'border-verde-floresta bg-verde-menta/40 scale-[1.01]'
+                      : 'border-verde-sage/60 hover:border-verde-floresta bg-creme/20 hover:bg-creme/50'
+                  }`}
+                >
+                  <input
+                    ref={inputArquivoRef}
+                    type="file"
+                    multiple
+                    accept=".ofx,.csv,.xlsx,.xls,.pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files.length > 0) {
+                        validarEAdicionarArquivos(e.target.files)
+                      }
+                    }}
+                  />
+
+                  <div className="h-12 w-12 rounded-2xl bg-verde-menta text-verde-floresta flex items-center justify-center mx-auto mb-3 shadow-sm">
+                    <Upload className="h-6 w-6" />
+                  </div>
+
+                  <p className="text-sm font-bold text-verde-floresta">
+                    Clique para selecionar ou arraste seus arquivos aqui
+                  </p>
+                  <p className="text-xs text-texto-apoio mt-1">
+                    Você pode selecionar <strong>vários arquivos ao mesmo tempo</strong> (.OFX,
+                    .CSV, .XLSX, .PDF)
+                  </p>
+
+                  <div className="flex items-center justify-center gap-2 mt-4 flex-wrap">
+                    <span className="text-[10px] font-semibold bg-white border border-verde-menta px-2 py-0.5 rounded-md text-emerald-700">
+                      OFX (Recomendado)
+                    </span>
+                    <span className="text-[10px] font-semibold bg-white border border-verde-menta px-2 py-0.5 rounded-md text-blue-700">
+                      CSV
+                    </span>
+                    <span className="text-[10px] font-semibold bg-white border border-verde-menta px-2 py-0.5 rounded-md text-green-800">
+                      Excel (XLS/XLSX)
+                    </span>
+                    <span className="text-[10px] font-semibold bg-white border border-verde-menta px-2 py-0.5 rounded-md text-red-700">
+                      PDF (Beta)
+                    </span>
+                  </div>
+                </div>
+
+                {/* Lista de Arquivos Selecionados */}
+                {arquivosSelecionados.length > 0 && (
+                  <div className="space-y-3 pt-2">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-xs font-bold text-verde-floresta flex items-center gap-1.5">
+                        <Layers className="h-4 w-4" />
+                        <span>Arquivos Prontos para Processar ({arquivosSelecionados.length})</span>
+                      </h2>
+                      <button
+                        type="button"
+                        onClick={limparTodosArquivos}
+                        className="text-xs text-vermelho-suave hover:underline font-semibold"
+                      >
+                        Limpar todos
+                      </button>
+                    </div>
+
+                    <div className="divide-y divide-verde-menta/50 border border-verde-menta rounded-xl bg-white overflow-hidden max-h-60 overflow-y-auto">
+                      {arquivosSelecionados.map((arq) => (
+                        <div
+                          key={arq.id}
+                          className="p-3 flex items-center justify-between gap-3 hover:bg-creme/30 transition-colors"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            {getIconeArquivo(arq.nome)}
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-texto-principal truncate">
+                                {arq.nome}
+                              </p>
+                              <span className="text-[10px] text-texto-apoio">
+                                {(arq.tamanho / 1024).toFixed(1)} KB • Formato {arq.tipo}
+                              </span>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              removerArquivo(arq.id)
+                            }}
+                            className="p-1 rounded-md text-texto-apoio hover:text-vermelho-suave hover:bg-vermelho-suave/10 transition-colors"
+                            title="Remover este arquivo"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Botão de Ação Principal */}
+                    <div className="pt-2">
+                      <Botao
+                        onClick={handleProcessarTodos}
+                        carregando={processando}
+                        disabled={processando || contas.length === 0}
+                        className="w-full py-3 shadow-md gap-2"
+                      >
+                        <Sparkles className="h-4 w-4 text-dourado-suave" />
+                        <span>
+                          {processando
+                            ? progressoTexto || 'Processando extratos...'
+                            : `Processar & Categorizar ${arquivosSelecionados.length} ${
+                                arquivosSelecionados.length === 1 ? 'Arquivo' : 'Arquivos'
+                              }`}
+                        </span>
+                      </Botao>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Informações e Guia Rápido */}
+            <Card className="border-verde-menta bg-white shadow-sm p-4">
+              <button
+                type="button"
+                onClick={() => setAjudaAberta(!ajudaAberta)}
+                className="w-full flex items-center justify-between text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <HelpCircle className="h-4 w-4 text-verde-floresta" />
+                  <span className="font-semibold text-xs text-verde-floresta">
+                    Qual formato de arquivo devo usar? (Dicas e Colunas Esperadas)
+                  </span>
+                </div>
+                {ajudaAberta ? (
+                  <ChevronUp className="h-4 w-4 text-texto-apoio" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-texto-apoio" />
+                )}
+              </button>
+
+              {ajudaAberta && (
+                <div className="mt-3 pt-3 border-t border-verde-menta text-xs text-texto-apoio space-y-2 leading-relaxed">
+                  <p>
+                    <strong>OFX (Recomendado):</strong> O formato bancário universal mais estável e
+                    padronizado. Contém data exata, IDs bancários e valores sem ambiguidades.
+                  </p>
+                  <p>
+                    <strong>CSV / Excel:</strong> Certifique-se de que o cabeçalho contenha colunas
+                    reconhecíveis como <code>Data</code>, <code>Descrição</code> (ou{' '}
+                    <code>Histórico</code>) e <code>Valor</code>.
+                  </p>
+                  <p>
+                    <strong>PDF:</strong> Funciona para a maioria dos extratos textuais bancários.
+                    Se o PDF for uma foto escaneada, prefira exportar em CSV/OFX no internet
+                    banking.
+                  </p>
+                </div>
+              )}
+            </Card>
+          </div>
+
+          {/* Coluna Direita: Histórico de Documentos Importados */}
+          <div className="space-y-6">
+            <Card className="border-verde-menta bg-white shadow-sm overflow-hidden">
+              <CardHeader className="bg-creme/40 border-b border-verde-menta/60 pb-3">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-verde-floresta" />
+                  <CardTitle className="text-sm text-verde-floresta">
                     Histórico de Importações
                   </CardTitle>
-                  <CardDescription className="text-xs text-texto-apoio">
-                    Registro de arquivos enviados e status de processamento.
-                  </CardDescription>
                 </div>
-                <Botao
-                  variant="ghost"
-                  size="sm"
-                  onClick={carregarDadosIniciais}
-                  disabled={carregando}
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 ${carregando ? 'animate-spin' : ''}`} />
-                </Botao>
-              </div>
-            </CardHeader>
+                <CardDescription className="text-xs text-texto-apoio">
+                  Extratos que você já enviou anteriormente.
+                </CardDescription>
+              </CardHeader>
 
-            {historicoDocumentos.length === 0 ? (
-              <div className="p-6 text-center text-xs text-texto-apoio">
-                Nenhum documento importado até o momento.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-creme/60 text-texto-apoio font-semibold uppercase tracking-wider text-[10px]">
-                    <tr>
-                      <th className="py-2.5 px-4">Data do Upload</th>
-                      <th className="py-2.5 px-4">Nome do Arquivo</th>
-                      <th className="py-2.5 px-4">Tipo</th>
-                      <th className="py-2.5 px-4">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-verde-menta/40">
-                    {historicoDocumentos.map((doc) => {
-                      let dataFormatada = '—'
-                      try {
-                        if (doc.created_at) {
-                          const dt = new Date(doc.created_at)
-                          dataFormatada = !isNaN(dt.getTime())
-                            ? dt.toLocaleString('pt-BR')
-                            : String(doc.created_at)
-                        }
-                      } catch {
-                        dataFormatada = '—'
-                      }
+              <CardContent className="p-0 max-h-[520px] overflow-y-auto divide-y divide-verde-menta/40">
+                {carregandoDados ? (
+                  <div className="py-8 text-center text-xs text-texto-apoio">
+                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-verde-floresta border-t-transparent mx-auto mb-2" />
+                    Carregando histórico...
+                  </div>
+                ) : documentos.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-texto-apoio">
+                    Nenhum documento importado ainda.
+                  </div>
+                ) : (
+                  documentos.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="p-3.5 hover:bg-creme/20 transition-colors flex items-start justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-texto-principal truncate">
+                          {doc.nome_arquivo}
+                        </p>
+                        <div className="flex items-center gap-2 text-[10px] text-texto-apoio mt-0.5">
+                          <span>{formatarData(doc.created_at)}</span>
+                          <span>•</span>
+                          <span className="font-medium text-verde-floresta">
+                            {doc.total_lancamentos} lançamentos
+                          </span>
+                        </div>
+                      </div>
 
-                      return (
-                        <tr key={doc.id} className="hover:bg-verde-menta/10">
-                          <td className="py-2.5 px-4 tabular-nums text-texto-apoio">
-                            {dataFormatada}
-                          </td>
-                          <td className="py-2.5 px-4 font-medium text-texto-principal flex items-center gap-2">
-                            {doc.tipo === 'pdf' ? (
-                              <FileText className="h-4 w-4 text-vermelho-suave shrink-0" />
-                            ) : (
-                              <FileSpreadsheet className="h-4 w-4 text-verde-sucesso shrink-0" />
-                            )}
-                            <span className="truncate max-w-[200px] sm:max-w-xs">
-                              {doc.nome_arquivo || 'Arquivo sem nome'}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-4 uppercase text-texto-apoio font-semibold">
-                            {doc.tipo || '—'}
-                          </td>
-                          <td className="py-2.5 px-4">
-                            <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                                doc.status === 'importado'
-                                  ? 'bg-verde-sucesso/15 text-verde-sucesso'
-                                  : doc.status === 'processado'
-                                    ? 'bg-dourado/20 text-texto-principal'
-                                    : 'bg-vermelho-suave/15 text-vermelho-suave'
-                              }`}
-                            >
-                              {doc.status === 'importado' && <CheckCircle2 className="h-3 w-3" />}
-                              {doc.status === 'processado' && <Clock className="h-3 w-3" />}
-                              {doc.status === 'nao_importado' && <XCircle className="h-3 w-3" />}
-                              {doc.status === 'erro' && <AlertTriangle className="h-3 w-3" />}
-                              {doc.status === 'nao_importado' ? 'não importado' : doc.status}
-                            </span>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => abrirModalExcluirDoc(doc)}
+                          className="p-1.5 rounded-lg text-texto-apoio hover:text-vermelho-suave hover:bg-vermelho-suave/10 transition-colors"
+                          title="Excluir documento do histórico"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
       )}
 
       {/* ======================================================== */}
-      {/* ETAPA 2: PRÉVIA TRIPLA OBRIGATÓRIA                       */}
+      {/* MODO 2: PRÉ-VISUALIZAÇÃO & AUDITORIA DE LANÇAMENTOS     */}
       {/* ======================================================== */}
-      {etapaAtual === 'previa' && (
-        <div className="space-y-6 animate-fade-in">
-          {/* Banner Informativo com Contadores dos 3 Grupos */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {/* 1. Verde: Vai lançar */}
-            <div className="p-4 rounded-2xl bg-verde-sucesso/10 border border-verde-sucesso/30 flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-verde-sucesso text-white flex items-center justify-center font-bold shrink-0">
-                {itensVaiLancar.length}
-              </div>
-              <div>
-                <strong className="text-xs font-bold text-verde-sucesso block">
-                  🟢 Vai Lançar
-                </strong>
-                <p className="text-[11px] text-texto-apoio">
-                  Lançamentos novos com auto-categorização pronta.
-                </p>
-              </div>
-            </div>
-
-            {/* 2. Amarelo: Já existe */}
-            <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shrink-0">
-                {itensJaExiste.length}
-              </div>
-              <div>
-                <strong className="text-xs font-bold text-amber-800 block">
-                  🟡 Já Existe (Deduplicados)
-                </strong>
-                <p className="text-[11px] text-texto-apoio">
-                  Data + Valor + Descrição 100% idênticos. Não serão duplicados.
-                </p>
-              </div>
-            </div>
-
-            {/* 3. Vermelho: Precisa de Revisão */}
-            <div className="p-4 rounded-2xl bg-red-50 border border-red-200 flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-vermelho-suave text-white flex items-center justify-center font-bold shrink-0">
-                {itensRevisao.length}
-              </div>
-              <div>
-                <strong className="text-xs font-bold text-vermelho-suave block">
-                  🔴 Precisa de Revisão
-                </strong>
-                <p className="text-[11px] text-texto-apoio">
-                  Sem categoria ou com correspondência parcial de valor/data.
-                </p>
-              </div>
-            </div>
+      {emPrevia && (
+        <div className="space-y-6">
+          {/* Card Resumo da Prévia */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <Card className="border-verde-menta bg-white p-3.5 shadow-sm">
+              <span className="text-[11px] font-medium text-texto-apoio block">
+                Total a Importar
+              </span>
+              <span className="text-xl font-bold font-display text-verde-floresta">
+                {totaisPrevia.total}
+              </span>
+            </Card>
+            <Card className="border-verde-menta bg-white p-3.5 shadow-sm">
+              <span className="text-[11px] font-medium text-texto-apoio block">Receitas</span>
+              <span className="text-xl font-bold font-display text-verde-sucesso">
+                {totaisPrevia.receitas}
+              </span>
+            </Card>
+            <Card className="border-verde-menta bg-white p-3.5 shadow-sm">
+              <span className="text-[11px] font-medium text-texto-apoio block">Despesas</span>
+              <span className="text-xl font-bold font-display text-vermelho-suave">
+                {totaisPrevia.despesas}
+              </span>
+            </Card>
+            <Card className="border-verde-menta bg-white p-3.5 shadow-sm">
+              <span className="text-[11px] font-medium text-texto-apoio block">
+                Possíveis Duplicados
+              </span>
+              <span className="text-xl font-bold font-display text-amber-600">
+                {totaisPrevia.duplicados}
+              </span>
+            </Card>
+            <Card className="border-verde-menta bg-white p-3.5 shadow-sm col-span-2 sm:col-span-1">
+              <span className="text-[11px] font-medium text-texto-apoio block">Saldo Líquido</span>
+              <span
+                className={`text-lg font-bold font-display ${
+                  totaisPrevia.valorTotal >= 0 ? 'text-verde-sucesso' : 'text-vermelho-suave'
+                }`}
+              >
+                {formatarMoeda(totaisPrevia.valorTotal)}
+              </span>
+            </Card>
           </div>
 
-          {/* Barra de Ação da Confirmação */}
-          <Card className="border-verde-floresta bg-white shadow-sm p-4 sticky top-2 z-20">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-texto-principal">
-                  Total selecionado para entrar no banco:
-                </span>
-                <span className="font-display font-bold text-base text-verde-floresta tabular-nums">
-                  {totalParaSalvar} lançamentos
-                </span>
+          {/* Tabela de Auditoria e Edição dos Lançamentos */}
+          <Card className="border-verde-menta bg-white shadow-sm overflow-hidden">
+            <CardHeader className="bg-creme/40 border-b border-verde-menta/60 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-base text-verde-floresta">
+                  Revisão dos Lançamentos Extraídos
+                </CardTitle>
+                <CardDescription className="text-xs text-texto-apoio">
+                  Ajuste descrições, tipos e categorias antes de confirmar a gravação. Lançamentos
+                  desmarcados não serão salvos.
+                </CardDescription>
               </div>
 
               <div className="flex items-center gap-2">
                 <Botao
                   variant="ghost"
                   size="sm"
-                  onClick={reiniciarImportacao}
-                  disabled={salvandoImportacao}
+                  onClick={() => setEmPrevia(false)}
+                  disabled={salvando}
                 >
                   Cancelar
                 </Botao>
                 <Botao
-                  onClick={handleConfirmarImportacao}
-                  carregando={salvandoImportacao}
-                  disabled={totalParaSalvar === 0}
-                  className="gap-2 shadow-md"
+                  onClick={handleConfirmarImportacaoFinal}
+                  carregando={salvando}
+                  className="gap-2 shadow-sm"
                 >
                   <Check className="h-4 w-4" />
-                  <span>Confirmar Importação</span>
+                  <span>Confirmar & Salvar no Banco</span>
                 </Botao>
               </div>
-            </div>
-          </Card>
+            </CardHeader>
 
-          {/* TABELA DETALHADA DA PRÉVIA */}
-          <Card className="border-verde-menta bg-white shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-creme/60 border-b border-verde-menta text-texto-apoio font-semibold uppercase tracking-wider text-[10px]">
+            <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead className="bg-creme/60 sticky top-0 z-10 border-b border-verde-menta text-texto-apoio uppercase font-semibold text-[10px]">
                   <tr>
-                    <th className="py-3 px-3 w-10 text-center">Importar?</th>
-                    <th className="py-3 px-3">Status / Grupo</th>
-                    <th className="py-3 px-3">Data</th>
-                    <th className="py-3 px-3">Descrição Extraída</th>
-                    <th className="py-3 px-3">Categoria</th>
-                    <th className="py-3 px-3">Subcategoria</th>
-                    <th className="py-3 px-3 text-right">Valor</th>
+                    <th className="p-3 w-10 text-center">Importar</th>
+                    <th className="p-3 w-28">Data</th>
+                    <th className="p-3">Descrição / Estabelecimento</th>
+                    <th className="p-3 w-32">Tipo</th>
+                    <th className="p-3 w-36 text-right">Valor</th>
+                    <th className="p-3 w-64">Categoria Sugerida</th>
+                    <th className="p-3 w-28 text-center">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-verde-menta/40">
-                  {itensPrevia.map((item) => {
-                    const isReceita = item.tipo === 'receita'
-                    const catPaiSelecionada = categorias.find((c) => c.id === item.categoria_id)
-                    const subcategoriasDisponiveis = catPaiSelecionada?.subcategorias || []
-
+                  {previaLancamentos.map((item) => {
                     return (
                       <tr
-                        key={item.idTemp}
+                        key={item.id_temporario}
                         className={`transition-colors ${
-                          item.grupo === 'ja_existe'
-                            ? 'bg-amber-50/50 opacity-70'
-                            : item.grupo === 'precisa_revisao'
-                              ? 'bg-red-50/40'
-                              : 'hover:bg-verde-menta/20'
+                          item.ignorar
+                            ? 'bg-gray-50/70 opacity-60'
+                            : item.duplicado_provavel
+                              ? 'bg-amber-50/40 hover:bg-amber-50/70'
+                              : 'hover:bg-creme/20'
                         }`}
                       >
-                        {/* Checkbox de Inclusão */}
-                        <td className="py-3 px-3 text-center">
+                        {/* Checkbox Importar */}
+                        <td className="p-3 text-center">
                           <input
                             type="checkbox"
-                            checked={item.selecionadoParaSalvar}
-                            onChange={() => handleToggleSelecaoItem(item.idTemp)}
-                            className="h-4 w-4 rounded border-verde-menta text-verde-floresta focus:ring-verde-sage"
+                            checked={!item.ignorar}
+                            onChange={() => toggleIgnorarLancamento(item.id_temporario)}
+                            className="h-4 w-4 rounded border-verde-menta text-verde-floresta focus:ring-verde-sage cursor-pointer"
                           />
                         </td>
 
-                        {/* Grupo Badge & Motivo */}
-                        <td className="py-3 px-3 whitespace-nowrap">
-                          {item.grupo === 'vai_lancar' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-verde-sucesso/15 text-verde-sucesso">
-                              🟢 Vai lançar
-                            </span>
-                          )}
-                          {item.grupo === 'ja_existe' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-800">
-                              🟡 Já existe
-                            </span>
-                          )}
-                          {item.grupo === 'precisa_revisao' && (
-                            <div className="space-y-0.5">
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-vermelho-suave/15 text-vermelho-suave">
-                                🔴 Revisão
-                              </span>
-                              <span
-                                className="block text-[10px] text-texto-apoio max-w-xs truncate"
-                                title={item.motivoGrupo}
-                              >
-                                {item.motivoGrupo}
-                              </span>
-                            </div>
-                          )}
-                        </td>
-
                         {/* Data */}
-                        <td className="py-3 px-3 whitespace-nowrap tabular-nums text-texto-principal font-medium">
-                          {item.data ? item.data.split('-').reverse().join('/') : '—'}
+                        <td className="p-3 font-medium text-texto-principal whitespace-nowrap">
+                          {formatarData(item.data)}
                         </td>
 
-                        {/* Descrição */}
-                        <td className="py-3 px-3 font-semibold text-texto-principal">
-                          <span className="truncate max-w-xs block" title={item.descricao}>
-                            {item.descricao}
-                          </span>
-                        </td>
-
-                        {/* Categoria Select */}
-                        <td className="py-3 px-3 min-w-[160px]">
-                          <select
-                            value={item.categoria_id || ''}
+                        {/* Descrição editável */}
+                        <td className="p-3">
+                          <input
+                            type="text"
+                            value={item.descricao}
                             onChange={(e) =>
-                              handleAlterarCategoriaItem(item.idTemp, e.target.value)
+                              handleAlterarDescricao(item.id_temporario, e.target.value)
                             }
-                            className={`w-full px-2 py-1.5 rounded-lg border text-xs focus:outline-none focus:ring-1 focus:ring-verde-sage ${
-                              !item.categoria_id
-                                ? 'border-vermelho-suave bg-red-50 text-vermelho-suave font-semibold'
-                                : 'border-verde-menta bg-white text-texto-principal'
+                            className="w-full px-2 py-1 rounded-md border border-transparent hover:border-verde-menta focus:border-verde-floresta bg-transparent focus:bg-white text-xs text-texto-principal"
+                          />
+                        </td>
+
+                        {/* Tipo: Receita / Despesa */}
+                        <td className="p-3">
+                          <select
+                            value={item.tipo}
+                            onChange={(e) =>
+                              handleAlterarTipo(
+                                item.id_temporario,
+                                e.target.value as 'receita' | 'despesa',
+                              )
+                            }
+                            className={`px-2 py-1 rounded-lg text-xs font-semibold border border-verde-menta/60 bg-white ${
+                              item.tipo === 'receita' ? 'text-verde-sucesso' : 'text-vermelho-suave'
                             }`}
                           >
-                            <option value="">Selecione categoria</option>
-                            {categorias
-                              .filter((c) => !c.categoria_pai_id && c.tipo === item.tipo)
-                              .map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.nome}
-                                </option>
-                              ))}
-                          </select>
-                        </td>
-
-                        {/* Subcategoria Select */}
-                        <td className="py-3 px-3 min-w-[160px]">
-                          <select
-                            value={item.subcategoria_id || ''}
-                            disabled={!item.categoria_id || subcategoriasDisponiveis.length === 0}
-                            onChange={(e) =>
-                              handleAlterarSubcategoriaItem(item.idTemp, e.target.value)
-                            }
-                            className="w-full px-2 py-1.5 rounded-lg border border-verde-menta bg-white text-xs text-texto-principal disabled:opacity-40 focus:outline-none focus:ring-1 focus:ring-verde-sage"
-                          >
-                            <option value="">
-                              {!item.categoria_id
-                                ? '—'
-                                : subcategoriasDisponiveis.length === 0
-                                  ? 'Sem subcategorias'
-                                  : 'Subcategoria (opcional)'}
-                            </option>
-                            {subcategoriasDisponiveis.map((sub) => (
-                              <option key={sub.id} value={sub.id}>
-                                {sub.nome}
-                              </option>
-                            ))}
+                            <option value="despesa">Despesa</option>
+                            <option value="receita">Receita</option>
                           </select>
                         </td>
 
                         {/* Valor */}
                         <td
-                          className={`py-3 px-3 text-right font-display font-bold tabular-nums whitespace-nowrap ${
-                            isReceita ? 'text-verde-sucesso' : 'text-vermelho-suave'
+                          className={`p-3 text-right font-bold whitespace-nowrap ${
+                            item.tipo === 'receita' ? 'text-verde-sucesso' : 'text-vermelho-suave'
                           }`}
                         >
-                          {isReceita ? '+ ' : '- '}
-                          {item.valor.toLocaleString('pt-BR', {
-                            style: 'currency',
-                            currency: 'BRL',
-                          })}
+                          {item.tipo === 'despesa' ? '-' : '+'} {formatarMoeda(item.valor)}
+                        </td>
+
+                        {/* Dropdown de Categorias */}
+                        <td className="p-3">
+                          <select
+                            value={item.subcategoria_id || ''}
+                            onChange={(e) =>
+                              handleAlterarCategoriaLancamento(item.id_temporario, e.target.value)
+                            }
+                            className="w-full px-2 py-1 rounded-md border border-verde-menta/60 bg-white text-xs text-texto-principal focus:ring-1 focus:ring-verde-sage"
+                          >
+                            <option value="">Sem categoria</option>
+                            {todasSubcategorias
+                              .filter((sub) => sub.tipo === item.tipo)
+                              .map((sub) => (
+                                <option key={sub.id} value={sub.id}>
+                                  {sub.nome}
+                                </option>
+                              ))}
+                          </select>
+                        </td>
+
+                        {/* Badge de Duplicado / James IA */}
+                        <td className="p-3 text-center whitespace-nowrap">
+                          {item.duplicado_provavel ? (
+                            <span
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800"
+                              title="Lançamento com mesma data e valor já existe na conta"
+                            >
+                              <AlertTriangle className="h-3 w-3" />
+                              Duplicado?
+                            </span>
+                          ) : item.sugestao_ia ? (
+                            <span
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-verde-menta text-verde-floresta"
+                              title="Categorizado automaticamente pelo James IA"
+                            >
+                              <Sparkles className="h-3 w-3 text-dourado-suave" />
+                              IA James
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-texto-apoio">Manual</span>
+                          )}
                         </td>
                       </tr>
                     )
@@ -963,78 +1025,131 @@ export const ImportacaoPage: React.FC = () => {
       )}
 
       {/* ======================================================== */}
-      {/* ETAPA 3: SUCESSO DA IMPORTAÇÃO                           */}
-      {/* ======================================================== */}
-      {etapaAtual === 'sucesso' && (
-        <Card className="border-verde-sucesso/40 bg-white p-12 text-center shadow-sm max-w-xl mx-auto animate-fade-in-up">
-          <div className="space-y-4">
-            <div className="h-16 w-16 rounded-full bg-verde-sucesso/15 text-verde-sucesso flex items-center justify-center mx-auto ring-8 ring-verde-sucesso/10">
-              <CheckCircle2 className="h-9 w-9" />
-            </div>
-
-            <div className="space-y-1">
-              <h2 className="font-display font-bold text-2xl text-verde-floresta">
-                Importação Realizada com Sucesso!
-              </h2>
-              <p className="text-sm text-texto-apoio">
-                <strong>{totalImportadosSucesso} lançamentos</strong> foram criados e vinculados à
-                sua conta com precisão.
-              </p>
-            </div>
-
-            <div className="pt-4 flex items-center justify-center gap-3">
-              <Botao variant="secondary" onClick={reiniciarImportacao}>
-                Importar Outro Extrato
-              </Botao>
-              <Botao onClick={() => (window.location.href = '/lancamentos')}>Ver Lançamentos</Botao>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* ======================================================== */}
-      {/* MODAL CRIAÇÃO RÁPIDA DE CONTA                            */}
+      {/* MODAL EXCLUSÃO DE DOCUMENTO DO HISTÓRICO                */}
       {/* ======================================================== */}
       <Modal
-        aberto={modalNovaContaAberto}
-        aoFechar={() => !salvandoNovaConta && setModalNovaContaAberto(false)}
-        titulo="Criar Nova Conta Bancária"
-        descricao="Crie rapidamente uma conta para associar aos lançamentos deste extrato."
-        tamanho="sm"
-      >
-        <form onSubmit={handleCriarNovaContaRapida} className="space-y-4">
-          <div>
-            <label
-              htmlFor={nomeNovaContaId}
-              className="block text-xs font-semibold text-texto-principal mb-1.5"
-            >
-              Nome da Conta *
-            </label>
-            <input
-              id={nomeNovaContaId}
-              type="text"
-              required
-              placeholder="Ex: Inter PJ, Carteira XP"
-              value={nomeNovaConta}
-              onChange={(e) => setNomeNovaConta(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-verde-menta bg-white text-sm text-texto-principal focus:outline-none focus:ring-2 focus:ring-verde-sage"
-            />
-          </div>
-
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-verde-menta">
+        aberto={modalExcluirDocAberto}
+        aoFechar={() => !excluindoDoc && setModalExcluirDocAberto(false)}
+        titulo="Excluir Extrato Importado"
+        descricao={`Documento: ${documentoParaExcluir?.nome_arquivo}`}
+        tamanho="md"
+        rodape={
+          <>
             <Botao
-              type="button"
               variant="ghost"
-              onClick={() => setModalNovaContaAberto(false)}
-              disabled={salvandoNovaConta}
+              onClick={() => setModalExcluirDocAberto(false)}
+              disabled={excluindoDoc}
             >
               Cancelar
             </Botao>
-            <Botao type="submit" carregando={salvandoNovaConta}>
-              Criar Conta
+            <Botao variant="danger" onClick={handleConfirmarExclusaoDoc} carregando={excluindoDoc}>
+              Confirmar Exclusão
             </Botao>
+          </>
+        }
+      >
+        <div className="space-y-4 text-xs text-texto-apoio">
+          <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 space-y-2">
+            <div className="flex items-center gap-1.5 font-bold text-amber-800">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>Como você deseja realizar esta exclusão?</span>
+            </div>
+            <p className="text-[11px] leading-relaxed">
+              Este arquivo gerou <strong>{totalLancamentosVinculados} lançamentos</strong> no seu
+              sistema. Escolha o comportamento desejado:
+            </p>
           </div>
-        </form>
+
+          <div className="space-y-2.5">
+            <label
+              className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
+                tipoExclusao === 'apenas_registro'
+                  ? 'border-verde-floresta bg-verde-menta/20'
+                  : 'border-verde-menta/60 bg-white hover:bg-creme/30'
+              }`}
+            >
+              <input
+                type="radio"
+                name="tipo_exclusao"
+                checked={tipoExclusao === 'apenas_registro'}
+                onChange={() => setTipoExclusao('apenas_registro')}
+                className="mt-0.5 text-verde-floresta focus:ring-verde-sage"
+              />
+              <div>
+                <p className="font-bold text-xs text-texto-principal">
+                  1. Excluir apenas o registro do histórico
+                </p>
+                <p className="text-[11px] text-texto-apoio mt-0.5">
+                  Remove o documento do histórico de arquivos, mas{' '}
+                  <strong>mantém todos os lançamentos</strong> cadastrados em suas contas.
+                </p>
+              </div>
+            </label>
+
+            <label
+              className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
+                tipoExclusao === 'documento_e_lancamentos'
+                  ? 'border-vermelho-suave bg-vermelho-suave/10'
+                  : 'border-verde-menta/60 bg-white hover:bg-creme/30'
+              }`}
+            >
+              <input
+                type="radio"
+                name="tipo_exclusao"
+                checked={tipoExclusao === 'documento_e_lancamentos'}
+                onChange={() => setTipoExclusao('documento_e_lancamentos')}
+                className="mt-0.5 text-vermelho-suave focus:ring-vermelho-suave"
+              />
+              <div>
+                <p className="font-bold text-xs text-vermelho-suave">
+                  2. Excluir documento E todos os lançamentos vinculados
+                </p>
+                <p className="text-[11px] text-texto-apoio mt-0.5">
+                  Remove o histórico{' '}
+                  <strong>
+                    E deleta definitivamente todos os {totalLancamentosVinculados} lançamentos
+                  </strong>{' '}
+                  gerados por este extrato.
+                </p>
+              </div>
+            </label>
+          </div>
+
+          <p className="text-[11px] text-red-600 font-semibold pt-1">
+            ⚠️ Atenção: Esta ação não poderá ser desfeita.
+          </p>
+        </div>
+      </Modal>
+
+      {/* ======================================================== */}
+      {/* MODAL DE SUCESSO                                         */}
+      {/* ======================================================== */}
+      <Modal
+        aberto={sucessoModal}
+        aoFechar={() => setSucessoModal(false)}
+        titulo="Importação Concluída com Sucesso!"
+        tamanho="sm"
+        rodape={
+          <Botao onClick={() => setSucessoModal(false)} className="w-full">
+            Concluir & Visualizar Lançamentos
+          </Botao>
+        }
+      >
+        <div className="text-center py-4 space-y-3">
+          <div className="h-14 w-14 rounded-full bg-verde-menta text-verde-floresta flex items-center justify-center mx-auto shadow-sm">
+            <CheckCircle2 className="h-8 w-8 text-verde-sucesso" />
+          </div>
+
+          <div>
+            <h2 className="text-base font-bold text-verde-floresta">
+              {salvosResumo.total} transações importadas
+            </h2>
+            <p className="text-xs text-texto-apoio mt-1">
+              Todos os lançamentos aprovados foram salvos com sucesso e já estão refletidos no seu
+              Dashboard e Extrato.
+            </p>
+          </div>
+        </div>
       </Modal>
     </div>
   )
